@@ -1,0 +1,33 @@
+{
+  "fill" : {
+    "automatic-gradient" : "extended-srgb:0.78431,0.06275,0.18039,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "schedule.svg",
+          "name" : "schedule"
+        },
+        {
+          "image-name" : "lens.svg",
+          "name" : "lens"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.4
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

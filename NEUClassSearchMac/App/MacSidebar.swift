@@ -1,0 +1,71 @@
+//
+//  MacSidebar.swift
+//  Term Organize (macOS)
+//
+//  Copyright (C) 2026 Term Organize contributors.
+//  SPDX-License-Identifier: AGPL-3.0-only
+//  See LICENSE and NOTICE.md in the project root for details.
+//
+
+import SwiftUI
+
+/// The main window's sidebar: browsing areas, the term's schedules, degree plans and the
+/// watchlist. The term picker sits in the toolbar above it.
+struct MacSidebar: View {
+    @Binding var selection: MacSidebarItem?
+
+    @Environment(CatalogStore.self) private var catalog
+    @Environment(UserDataStore.self) private var userData
+    /// Rename, duplicate, "My Schedule" and delete for the schedule rows' context menus.
+    @State private var planManager = MacPlanManager()
+
+    var body: some View {
+        List(selection: $selection) {
+            Section("Browse") {
+                Label("Search", systemImage: "magnifyingglass").tag(MacSidebarItem.search)
+                Label("Subjects", systemImage: "square.grid.2x2").tag(MacSidebarItem.subjects)
+                Label("Saved", systemImage: "bookmark").tag(MacSidebarItem.saved)
+                Label("Professors", systemImage: "person.2").tag(MacSidebarItem.professors)
+                Label("Free Rooms", systemImage: "door.left.hand.open").tag(MacSidebarItem.rooms)
+            }
+
+            Section(catalog.selectedTerm.map { "Schedules · \($0.shortName)" } ?? "Schedules") {
+                Label("All Schedules", systemImage: "calendar").tag(MacSidebarItem.schedules)
+                ForEach(schedules) { plan in
+                    Label(plan.name, systemImage: plan.isPrimary ? "star.fill" : "calendar")
+                        .tag(MacSidebarItem.schedule(plan.id))
+                        .contextMenu { MacSchedulePlanMenu(plan: plan, manager: planManager) }
+                }
+            }
+
+            Section("Degree Plans") {
+                Label("All Degree Plans", systemImage: "graduationcap").tag(MacSidebarItem.degreePlans)
+                ForEach(userData.sortedDegreePlans) { plan in
+                    Label(plan.name, systemImage: plan.isPrimary ? "star.fill" : "graduationcap")
+                        .tag(MacSidebarItem.degreePlan(plan.id))
+                }
+            }
+
+            Section("Alerts") {
+                Label("Watchlist", systemImage: "bell")
+                    .badge(userData.watchlist.count)
+                    .tag(MacSidebarItem.watchlist)
+            }
+        }
+        .listStyle(.sidebar)
+        .macPlanDialogs(planManager, userData: userData) { plan in
+            if selection == .schedule(plan.id) { selection = .schedules }
+            userData.deletePlan(id: plan.id)
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                TermMenu()
+            }
+        }
+    }
+
+    private var schedules: [SchedulePlan] {
+        guard let code = catalog.selectedTerm?.code else { return [] }
+        return userData.plans(in: code)
+    }
+}

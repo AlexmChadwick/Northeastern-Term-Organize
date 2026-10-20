@@ -40,6 +40,7 @@ let package = Package(
                 "Services/OfferingHistory.swift",
                 "Services/SearchEngine.swift",
                 "Services/TermCalendar.swift",
+                "Services/UserDataExternalChanges.swift",
                 "Services/UserDataFile.swift",
                 "Services/UserModels.swift",
             ]

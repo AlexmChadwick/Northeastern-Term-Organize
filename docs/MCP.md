@@ -63,11 +63,14 @@ Writes take an exclusive lock (`UserData.json.lock`), copy the previous file to
 `UserData.json.bak` (one rolling backup), write a temp file in the same directory,
 and `rename` it over `UserData.json`.
 
-The app reloads that file when its scene becomes active, via
-`UserDataStore.reloadExternalChanges`, unless a local edit is still waiting out the
-400 ms save delay. In that window the app does not reload, and its next flush can
-replace an MCP write. Close or background the app so it flushes first, or retry after
-the `revision_conflict` error.
+The app watches `UserData.json` with a file source and reloads it when the bytes
+change, including while the window is already active. Becoming active reloads too.
+A reload waits if the app still has an edit that has not been written. That flush
+does not replace the file blindly. It compares the file with the last load, using
+each plan's revision and a SHA-256 of the bytes (a new modification time counts
+only when the bytes changed too). Plans edited on different sides are combined.
+When both sides edited the same plan, the file's version stays and the app's
+version is saved beside it as "<plan> (edited in app)". An MCP write is not dropped.
 
 ### How an MCP plan maps onto schedules
 

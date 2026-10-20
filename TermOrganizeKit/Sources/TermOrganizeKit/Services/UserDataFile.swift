@@ -54,25 +54,25 @@ enum UserDataFile {
     /// Reads the file (or an empty document), applies `change`, and writes it back,
     /// all while holding the lock.
     static func modify(at url: URL, _ change: (inout UserData) throws -> Void) throws {
-        let directory = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let lockURL = URL(fileURLWithPath: url.path + ".lock")
-        if !FileManager.default.fileExists(atPath: lockURL.path) {
-            _ = FileManager.default.createFile(atPath: lockURL.path, contents: Data())
+        try withLock(at: url) {
+            var data = (try? read(from: url)) ?? UserData()
+            try change(&data)
+            let encoded = try JSONEncoder.userData.encode(data)
+            try writeReplacing(encoded, to: url)
         }
-        let lock = try FileHandle(forUpdating: lockURL)
-        guard flock(lock.fileDescriptor, LOCK_EX) == 0 else { throw WriteError.lockFailed }
-        defer { flock(lock.fileDescriptor, LOCK_UN); try? lock.close() }
-        var data = (try? read(from: url)) ?? UserData()
-        try change(&data)
-        let encoded = try JSONEncoder.userData.encode(data)
-        try writeReplacing(encoded, to: url)
     }
 
     /// Writes `encoded` to `url` under an exclusive lock. The previous file, if any,
     /// is copied to `url` + `.bak` first. The new bytes land in a temp file in the
     /// same directory and then replace `url`.
     static func writeAtomically(_ encoded: Data, to url: URL) throws {
+        try withLock(at: url) {
+            try writeReplacing(encoded, to: url)
+        }
+    }
+
+    /// Holds the exclusive lock for `body`. The directory is created first.
+    static func withLock<T>(at url: URL, _ body: () throws -> T) throws -> T {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let lockURL = URL(fileURLWithPath: url.path + ".lock")
@@ -82,11 +82,11 @@ enum UserDataFile {
         let lock = try FileHandle(forUpdating: lockURL)
         guard flock(lock.fileDescriptor, LOCK_EX) == 0 else { throw WriteError.lockFailed }
         defer { flock(lock.fileDescriptor, LOCK_UN); try? lock.close() }
-        try writeReplacing(encoded, to: url)
+        return try body()
     }
 
     /// Caller holds the lock.
-    private static func writeReplacing(_ encoded: Data, to url: URL) throws {
+    static func writeReplacing(_ encoded: Data, to url: URL) throws {
         let directory = url.deletingLastPathComponent()
         let backup = URL(fileURLWithPath: url.path + ".bak")
         if FileManager.default.fileExists(atPath: url.path) {

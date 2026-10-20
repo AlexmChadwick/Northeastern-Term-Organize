@@ -268,7 +268,10 @@ On a Mac where Term Organize has been launched, the server reads and writes the 
 app's existing file,
 `~/Library/Containers/com.alexchadwick.neuclasssearch/Data/Library/Application Support/UserData.json`.
 The app sandbox is unchanged. See [`docs/MCP.md`](docs/MCP.md) for why the server is a
-separate unsandboxed process, and for the case where the app still has an unsaved edit.
+separate unsandboxed process. If the app still has an unsaved edit when the file
+changes, the next flush merges plans that were edited separately and, when both
+sides edited the same plan, keeps the file's version and a copy named
+"<plan> (edited in app)".
 
 Run the server tests with `cd TermOrganizeKit && swift test`. They use a temporary
 `UserData.json` and never the real plans file.

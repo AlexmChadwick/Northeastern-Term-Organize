@@ -50,6 +50,13 @@ final class UserDataStore {
         watchlist = stored.watchlist
         searchHistory = stored.searchHistory
         degreePlans = stored.degreePlans
+        loadedData = stored
+        fileStamp = UserDataFile.stamp(of: stored, at: fileURL)
+        startWatchingFile()
+    }
+
+    deinit {
+        fileWatcher?.stop()
     }
 
     /// Everything, as persisted.
@@ -363,12 +370,20 @@ final class UserDataStore {
         onPlansChanged?()
     }
 
-    /// True while a local edit is waiting to be written. External reloads wait for it.
+    /// True while a local edit is waiting to be written. A reload waits for the flush,
+    /// and the flush merges instead of replacing an external write.
     @ObservationIgnored private var hasPendingLocalEdit = false
+    /// The file contents last loaded or written, used as the merge base.
+    @ObservationIgnored private var loadedData: UserData
+    /// Revision map, modification time, and content hash of that load.
+    @ObservationIgnored private var fileStamp: UserDataFileStamp
+    /// Fires while the app is active, including after an atomic replace of the file.
+    @ObservationIgnored private var fileWatcher: UserDataFileWatcher?
 
     private func scheduleSave() {
-        if !isApplyingRemoteChanges { hasUnreportedChanges = true }
-        if !isApplyingRemoteChanges { hasPendingLocalEdit = true }
+        guard !isApplyingRemoteChanges else { return }
+        hasUnreportedChanges = true
+        hasPendingLocalEdit = true
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -377,19 +392,12 @@ final class UserDataStore {
         }
     }
 
-    /// Picks up plan edits made by the local MCP server while this process is open.
-    /// Does nothing while a local edit is still waiting to be saved, so the app's
-    /// own change is not replaced by a file it has not written yet.
+    /// Picks up plan edits made by the local MCP server. Does nothing while a local
+    /// edit is still waiting to be saved; that flush merges the file instead.
     func reloadExternalChanges() {
         guard !hasPendingLocalEdit, !isApplyingRemoteChanges else { return }
-        guard let stored = try? UserDataFile.read(from: fileURL) else { return }
-        let disk = stored.plans.map { ($0.id, $0.revision ?? 0, $0.updatedAt) }
-        let local = plans.map { ($0.id, $0.revision ?? 0, $0.updatedAt) }
-        guard disk.map(\.0) != local.map(\.0) || disk.map(\.1) != local.map(\.1) || disk.map(\.2) != local.map(\.2) else { return }
-        isApplyingRemoteChanges = true
-        plans = stored.plans
-        isApplyingRemoteChanges = false
-        onPlansChanged?()
+        guard let snapshot = UserDataFile.snapshotIfChanged(at: fileURL, since: fileStamp) else { return }
+        applySnapshot(snapshot)
     }
 
     /// Writes synchronously on the calling (main) actor. Use when the process may be
@@ -401,22 +409,59 @@ final class UserDataStore {
 
     /// Writes immediately (call when the app moves to the background).
     func flush() {
-        saveTask?.cancel()
-        saveTask = nil
-        let snapshot = data
-        let url = fileURL
-        hasPendingLocalEdit = false
-        Task.detached(priority: .utility) {
-            try? UserDataFile.write(snapshot, to: url)
-        }
+        writeNow()
         reportChanges()
     }
 
+    /// Before replacing `UserData.json`, compares it with the last load. Plans the
+    /// two sides edited separately are combined. A plan both sides edited keeps the
+    /// file version and also stores this process's version under a new name.
     private func writeNow() {
         saveTask?.cancel()
         saveTask = nil
+        let outcome: UserDataSaveResolution
+        do {
+            outcome = try UserDataFile.writeResolvingConflicts(
+                local: data, loaded: loadedData, baseline: fileStamp, to: fileURL)
+        } catch {
+            // The edit is still only in memory. Try again on the normal delay.
+            scheduleSave()
+            return
+        }
+        adopt(outcome)
         hasPendingLocalEdit = false
-        try? UserDataFile.write(data, to: fileURL)
+    }
+
+    private func startWatchingFile() {
+        let watcher = UserDataFileWatcher()
+        fileWatcher = watcher
+        watcher.start(fileURL: fileURL) { [weak self] in
+            Task { @MainActor in
+                self?.reloadExternalChanges()
+            }
+        }
+    }
+
+    private func applySnapshot(_ snapshot: UserDataFileSnapshot) {
+        adopt(UserDataSaveResolution(data: snapshot.data, stamp: snapshot.stamp))
+    }
+
+    /// Installs `outcome` without scheduling another save.
+    private func adopt(_ outcome: UserDataSaveResolution) {
+        let merged = outcome.data
+        isApplyingRemoteChanges = true
+        if merged.preferences != preferences { preferences = merged.preferences }
+        if merged.saved != saved { saved = merged.saved }
+        if merged.recents != recents { recents = merged.recents }
+        if merged.watchlist != watchlist { watchlist = merged.watchlist }
+        if merged.searchHistory != searchHistory { searchHistory = merged.searchHistory }
+        if merged.degreePlans != degreePlans { degreePlans = merged.degreePlans }
+        let plansChanged = merged.plans != plans
+        if plansChanged { plans = merged.plans }
+        loadedData = merged
+        fileStamp = outcome.stamp
+        isApplyingRemoteChanges = false
+        if plansChanged { onPlansChanged?() }
     }
 
     private func reportChanges() {

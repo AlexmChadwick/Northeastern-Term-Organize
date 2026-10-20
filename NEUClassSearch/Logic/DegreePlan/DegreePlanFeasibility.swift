@@ -54,6 +54,7 @@ enum DegreePlanFeasibility {
 
     struct TermReport: Hashable, Identifiable, Sendable {
         var termID: UUID
+        var id: UUID { termID }
         var name: String
         var problems: [Problem]
         /// Courses that have to leave for the semester to work: not offered, the smallest set
@@ -204,7 +205,7 @@ enum DegreePlanFeasibility {
                     courseID: nil,
                     course: nil,
                     kind: .timeClash,
-                    text: clashText(keys)
+                    text: clashText(blocking: keys, offered: offered, sections: sections)
                 ))
                 for id in blocking where !toMove.contains(id) { toMove.append(id) }
             }
@@ -245,12 +246,45 @@ enum DegreePlanFeasibility {
         return result
     }
 
-    private static func clashText(_ keys: [CourseKey]) -> String {
-        let names = keys.map(\.description)
+    /// Names the course that has to move and the one it cannot sit beside. The blocking set is
+    /// the smallest set to remove, so a pair of courses that overlap in every section is a set
+    /// of one: the partner is the course that stays, not the second member of that set.
+    private static func clashText(
+        blocking: [CourseKey],
+        offered: [(id: UUID, key: CourseKey)],
+        sections: TermSections
+    ) -> String {
+        if blocking.count == 1, let course = blocking.first {
+            let partners = offered.map(\.key).filter { $0 != course && sectionsConflict($0, course, sections) }
+            if let line = overlapLine(course.description, partners: partners.map(\.description)) {
+                return line
+            }
+        }
+        let names = blocking.map(\.description)
         guard let last = names.last else { return "No conflict-free schedule" }
         if names.count == 1 { return "No conflict-free schedule for \(last)" }
-        if names.count == 2 { return "No conflict-free schedule: \(names[0]) overlaps \(names[1])" }
+        if names.count == 2, sectionsConflict(blocking[0], blocking[1], sections) {
+            return "No conflict-free schedule: \(names[0]) overlaps \(names[1])"
+        }
         return "No conflict-free schedule for \(names.dropLast().joined(separator: ", ")) and \(last)"
+    }
+
+    /// True when no section of one course can be taken with any section of the other.
+    private static func sectionsConflict(_ a: CourseKey, _ b: CourseKey, _ sections: TermSections) -> Bool {
+        let left = sections.byCourse[a] ?? []
+        let right = sections.byCourse[b] ?? []
+        guard !left.isEmpty, !right.isEmpty else { return false }
+        return left.allSatisfy { section in right.allSatisfy { section.conflicts(with: $0) } }
+    }
+
+    private static func overlapLine(_ course: String, partners: [String]) -> String? {
+        switch partners.count {
+        case 0: return nil
+        case 1: return "No conflict-free schedule: \(course) overlaps \(partners[0])"
+        case 2: return "No conflict-free schedule: \(course) overlaps \(partners[0]) and \(partners[1])"
+        default:
+            return "No conflict-free schedule: \(course) overlaps \(partners.dropLast().joined(separator: ", ")) and \(partners[partners.count - 1])"
+        }
     }
 
     /// Classes beside the co-op, when they exceed the load a co-op term can take. The courses

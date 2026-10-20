@@ -164,7 +164,7 @@ enum DegreePlanReorganization {
     /// course-info lookup. `corequisites` reads corequisites instead.
     static func lookup(
         indexes: [CatalogIndex],
-        store: (CourseKey) -> Requisite??,
+        store: @escaping (CourseKey) -> Requisite??,
         corequisites: Bool = false
     ) -> (CourseKey) -> Requisite?? {
         { key in

@@ -37,6 +37,8 @@ struct DegreePlanView: View {
     @State private var haptic = DegreePlanHaptic()
     /// Remembers the requirements audit and finish milestone between updates.
     @State private var requirementsCache = DegreeRequirementsCache()
+    /// Offering history used to tell when a planned semester can't be taken.
+    @State private var feasibility = DegreePlanFeasibilityModel()
     @State private var suggestionCache = DegreeEquivalenceSuggestionCache()
     @AppStorage(DegreeEquivalenceDismissals.storageKey) private var dismissedSuggestions = ""
     /// How wide this screen is, to know whether the requirements fit beside the plan.
@@ -61,6 +63,7 @@ struct DegreePlanView: View {
         case export
         case requirementsSetup
         case equivalence(DegreeEquivalenceRequest)
+        case reorganize
 
         var id: String {
             switch self {
@@ -68,6 +71,7 @@ struct DegreePlanView: View {
             case .export: "export"
             case .requirementsSetup: "requirements-setup"
             case .equivalence(let request): "equivalence-\(request.id)"
+            case .reorganize: "reorganize"
             }
         }
     }
@@ -118,6 +122,10 @@ struct DegreePlanView: View {
                 await programCatalog.loadRequirements(for: plan)
             }
         }
+        .task(id: feasibilityKey) {
+            guard let plan = userData.degreePlan(id: planID) else { return }
+            await feasibility.loadIfNeeded(plan: plan, indexes: catalog.degreePlanSnapshot().indexes)
+        }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { screenWidth = $0 }
     }
 
@@ -138,6 +146,13 @@ struct DegreePlanView: View {
         return "\(plan?.catalogYear ?? 0)|\(plan?.catalogProgramPath ?? "")"
     }
 
+    private var feasibilityKey: String {
+        let plan = userData.degreePlan(id: planID)
+        let codes = plan?.degreePlanPlannedKeys.map(\.description).sorted().joined(separator: "|") ?? ""
+        let terms = catalog.degreePlanSnapshot().indexes.map(\.term.code).sorted().joined(separator: ",")
+        return codes + "#" + terms
+    }
+
     // MARK: Content
 
     private func content(_ plan: DegreePlan) -> some View {
@@ -155,6 +170,8 @@ struct DegreePlanView: View {
             catalogTitles: requirements.requirements?.courseTitles ?? [:],
             alsoComparing: requirements.requirements?.degreeListedCourses(concentrationID: plan.concentrationID) ?? []
         )
+        let report = feasibility.report(for: plan, snapshot: snapshot)
+        let termWarning = report.warningLine(milestone: requirements.milestone, plan: plan)
         let lastTermWithCourses = plan.terms.lastIndex { !$0.courses.isEmpty }
         // A wide iPad can show the requirements beside the plan, once they are set up.
         let canSplit = sizeClass == .regular && screenWidth >= Self.splitMinWidth && requirements.isSetUp
@@ -162,7 +179,10 @@ struct DegreePlanView: View {
 
         let list = List {
             Section {
-                DegreePlanHeaderCard(plan: plan, review: review, onUsePlan: { setPrimary(plan) }, onRetryChecks: { retryCourseInfo() })
+                DegreePlanHeaderCard(
+                    plan: plan, review: review, onUsePlan: { setPrimary(plan) }, onRetryChecks: { retryCourseInfo() },
+                    termWarning: termWarning, onReorganize: { sheet = .reorganize }
+                )
             } footer: {
                 headerFooter(plan, snapshot: snapshot, review: review)
             }
@@ -171,6 +191,7 @@ struct DegreePlanView: View {
             if !showsSplit {
                 DegreeRequirementsEntrySection(
                     context: requirements,
+                    blockedFinish: termWarning,
                     onSetUp: { sheet = .requirementsSetup },
                     onRetry: { Task { await programCatalog.loadRequirements(for: plan, forceRefresh: true) } }
                 )
@@ -191,7 +212,9 @@ struct DegreePlanView: View {
                 DegreePlanSemesterSection(
                     plan: plan, term: term, review: review, catalog: snapshot, actions: actions,
                     requirementNote: { requirements.requirementNote(for: $0, semester: term) },
-                    replacement: { replacement(for: $0, in: term, review: review, equivalences: equivalences) }
+                    replacement: { replacement(for: $0, in: term, review: review, equivalences: equivalences) },
+                    feasibility: report.report(for: term.id),
+                    onReorganize: { sheet = .reorganize }
                 )
                 if let milestone = requirements.milestone, milestone.termID == term.id {
                     // A calm marker between semesters: everything is met after this one.
@@ -284,6 +307,22 @@ struct DegreePlanView: View {
             DegreeRequirementsSetupSheet(planID: planID)
         case .equivalence(let request):
             DegreeEquivalenceSheet(request: request)
+        case .reorganize:
+            reorganizeSheet
+        }
+    }
+
+    @ViewBuilder
+    private var reorganizeSheet: some View {
+        if let plan = userData.degreePlan(id: planID) {
+            let snapshot = catalog.degreePlanSnapshot()
+            let report = feasibility.report(for: plan, snapshot: snapshot)
+            DegreePlanReorganizeSheet(
+                plan: plan,
+                hasKnownProblem: !report.infeasibleTerms.isEmpty,
+                load: { await proposeReorganization(of: plan) },
+                onAccept: { applyReorganization($0) }
+            )
         }
     }
 
@@ -460,6 +499,25 @@ struct DegreePlanView: View {
                     plan.studentID = before.studentID
                 }
             }
+        }
+    }
+
+    private func proposeReorganization(of plan: DegreePlan) async -> DegreePlanReorganization.Proposal? {
+        await DegreePlanReorganization.propose(
+            plan: plan,
+            info: info,
+            requirements: programCatalog.requirements(for: plan),
+            snapshot: catalog.degreePlanSnapshot()
+        )
+    }
+
+    private func applyReorganization(_ changes: [DegreePlanReorganization.Change]) {
+        let count = changes.count
+        performUndoable(
+            count == 1 ? "Reorganized 1 course" : "Reorganized \(count) courses",
+            systemImage: "arrow.triangle.2.circlepath"
+        ) { plan in
+            plan.terms = DegreePlanReorganization.applying(changes, to: plan).terms
         }
     }
 

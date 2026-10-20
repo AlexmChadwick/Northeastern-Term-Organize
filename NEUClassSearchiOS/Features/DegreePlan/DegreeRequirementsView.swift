@@ -30,6 +30,7 @@ struct DegreeRequirementsView: View {
     @State private var substitutionRequest: DegreeSubstitutionRequest?
     @State private var substitutionToDelete: RequirementSubstitution?
     @State private var cache: DegreeRequirementsCache
+    @State private var feasibility = DegreePlanFeasibilityModel()
     @State private var suggestionCache = DegreeEquivalenceSuggestionCache()
     @State private var questionCache = DegreePetitionQuestionCache()
     @State private var equivalenceRequest: DegreeEquivalenceRequest?
@@ -71,6 +72,13 @@ struct DegreeRequirementsView: View {
         )
     }
 
+    private var feasibilityKey: String {
+        let plan = userData.degreePlan(id: planID)
+        let codes = plan?.degreePlanPlannedKeys.map(\.description).sorted().joined(separator: "|") ?? ""
+        let terms = catalog.degreePlanSnapshot().indexes.map(\.term.code).sorted().joined(separator: ",")
+        return codes + "#" + terms
+    }
+
     var body: some View {
         Group {
             if let plan = userData.degreePlan(id: planID) {
@@ -90,6 +98,10 @@ struct DegreeRequirementsView: View {
         ))
         .task(id: loadKey) { await load(forceRefresh: false) }
         .task(id: courseInfoKey) { await loadCourseInfo() }
+        .task(id: feasibilityKey) {
+            guard let plan = userData.degreePlan(id: planID) else { return }
+            await feasibility.loadIfNeeded(plan: plan, indexes: catalog.degreePlanSnapshot().indexes)
+        }
         #if DEBUG
         .task {
             // Launch arguments of the debug build's sample plans: a starting filter, an open requirement.
@@ -233,7 +245,11 @@ struct DegreeRequirementsView: View {
 
         return List {
             Section {
-                DegreeRequirementsSummary(context: context, audit: audit)
+                DegreeRequirementsSummary(
+                    context: context, audit: audit,
+                    blockedFinish: feasibility.report(for: plan, snapshot: catalog.degreePlanSnapshot())
+                        .warningLine(milestone: context.milestone, plan: plan)
+                )
             } footer: {
                 attribution(context: context, requirements: requirements)
             }

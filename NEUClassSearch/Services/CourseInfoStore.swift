@@ -89,6 +89,13 @@ final class CourseInfoStore {
         return { table[$0] }
     }
 
+    /// Corequisites by course, in the same shape as `requisiteLookup`: nil when the course
+    /// isn't known, `.some(nil)` when it is known to have none.
+    func corequisiteLookup() -> (CourseKey) -> Requisite?? {
+        let table = infos.mapValues(\.corequisites)
+        return { table[$0] }
+    }
+
     /// Everything that counts as something else: what Banner says (mutual exclusions, cross-listed
     /// courses of the loaded terms) merged with the equivalences the plan's student declared.
     func equivalences(for plan: DegreePlan?) -> CourseEquivalences {

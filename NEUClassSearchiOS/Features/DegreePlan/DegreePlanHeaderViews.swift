@@ -17,6 +17,9 @@ struct DegreePlanHeaderCard: View {
     var onUsePlan: () -> Void
     /// Looks up again the courses whose lookup failed.
     var onRetryChecks: (() -> Void)?
+    /// A semester can't be taken as planned. Shown with a way to reorganize the plan.
+    var termWarning: String? = nil
+    var onReorganize: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
@@ -26,6 +29,7 @@ struct DegreePlanHeaderCard: View {
                 .fixedSize(horizontal: false, vertical: true)
             totals
             checks
+            termWarningRow
             primaryRow
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -177,6 +181,23 @@ struct DegreePlanHeaderCard: View {
                          : "\(notListed) courses couldn’t be checked because Banner’s catalog doesn’t list them.")
         }
         return lines
+    }
+
+    @ViewBuilder
+    private var termWarningRow: some View {
+        if let termWarning, let onReorganize {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Label(termWarning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(action: onReorganize) {
+                    Label(DegreePlanReorganizeCopy.action, systemImage: "arrow.triangle.2.circlepath")
+                }
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.borderless)
+            }
+        }
     }
 
     // MARK: Primary

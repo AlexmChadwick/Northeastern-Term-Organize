@@ -14,6 +14,8 @@ import SwiftUI
 /// opens the full requirements.
 struct DegreeRequirementsEntrySection: View {
     var context: DegreeRequirementsContext
+    /// Replaces “On track to finish…” when a semester at or before the finish can't be taken.
+    var blockedFinish: String? = nil
     var onSetUp: () -> Void
     var onRetry: () -> Void
 
@@ -22,7 +24,7 @@ struct DegreeRequirementsEntrySection: View {
             Section {
                 if let audit = context.audit {
                     NavigationLink(value: AppRoute.degreeRequirements(planID: context.plan.id)) {
-                        DegreeRequirementsSummary(context: context, audit: audit, openItemLimit: 3)
+                        DegreeRequirementsSummary(context: context, audit: audit, openItemLimit: 3, blockedFinish: blockedFinish)
                     }
                     .accessibilityHint("Shows every requirement")
                 } else if let failure = context.failure {

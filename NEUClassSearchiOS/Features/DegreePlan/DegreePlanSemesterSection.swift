@@ -21,11 +21,17 @@ struct DegreePlanSemesterSection: View {
     var requirementNote: (DegreePlanCourse) -> String? = { _ in nil }
     /// What to plan instead of a course that is no longer offered: a current course it counts as.
     var replacement: (DegreePlanCourse) -> CourseKey? = { _ in nil }
+    /// Why this semester can't be taken, when it can't.
+    var feasibility: DegreePlanFeasibility.TermReport? = nil
+    var onReorganize: (() -> Void)? = nil
 
     @Environment(AppRouter.self) private var router
 
     var body: some View {
         Section {
+            if let feasibility, feasibility.isInfeasible, let onReorganize {
+                DegreePlanTermWarning(report: feasibility, onReorganize: onReorganize)
+            }
             if term.courses.isEmpty {
                 Text("No courses yet")
                     .foregroundStyle(.secondary)
@@ -70,6 +76,11 @@ struct DegreePlanSemesterSection: View {
                 actions.addCourse(term.id)
             } label: {
                 Label("Add course…", systemImage: "plus")
+            }
+            if feasibility?.isInfeasible == true, let onReorganize {
+                Button(action: onReorganize) {
+                    Label(DegreePlanReorganizeCopy.action, systemImage: "arrow.triangle.2.circlepath")
+                }
             }
             buildScheduleItem
             Divider()

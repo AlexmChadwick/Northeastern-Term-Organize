@@ -81,6 +81,7 @@ struct MacDegreeRequirementsContent: View {
     @State private var substitutionRequest: DegreeSubstitutionRequest?
     @State private var substitutionToDelete: RequirementSubstitution?
     @State private var cache = DegreeRequirementsCache()
+    @State private var feasibility = DegreePlanFeasibilityModel()
     @State private var suggestionCache = DegreeEquivalenceSuggestionCache()
     @State private var questionCache = DegreePetitionQuestionCache()
     @State private var equivalenceRequest: DegreeEquivalenceRequest?
@@ -113,6 +114,13 @@ struct MacDegreeRequirementsContent: View {
     private static let tableMinWidth: CGFloat = 600
     /// The full page shows its details pane from this width, until the person says otherwise.
     private static let wideWindowWidth: CGFloat = 1100
+
+    private var feasibilityKey: String {
+        let plan = userData.degreePlan(id: planID)
+        let codes = plan?.degreePlanPlannedKeys.map(\.description).sorted().joined(separator: "|") ?? ""
+        let terms = catalog.degreePlanSnapshot().indexes.map(\.term.code).sorted().joined(separator: ",")
+        return codes + "#" + terms
+    }
 
     private var loadKey: String {
         let plan = userData.degreePlan(id: planID)
@@ -166,6 +174,10 @@ struct MacDegreeRequirementsContent: View {
         )
         .task(id: loadKey) { await load(forceRefresh: false) }
         .task(id: courseInfoKey) { await loadCourseInfo() }
+        .task(id: feasibilityKey) {
+            guard let plan = userData.degreePlan(id: planID) else { return }
+            await feasibility.loadIfNeeded(plan: plan, indexes: catalog.degreePlanSnapshot().indexes)
+        }
         .sheet(isPresented: $isEditingSetup) {
             MacDegreeRequirementsSetupSheet(planID: planID)
         }
@@ -443,7 +455,11 @@ struct MacDegreeRequirementsContent: View {
         return ScrollViewReader { proxy in
             List(selection: $selectedRuleID) {
                 Section {
-                    DegreeRequirementsSummary(context: context, audit: audit)
+                    DegreeRequirementsSummary(
+                        context: context, audit: audit,
+                        blockedFinish: feasibility.report(for: plan, snapshot: catalog.degreePlanSnapshot())
+                            .warningLine(milestone: context.milestone, plan: plan)
+                    )
                         .selectionDisabled()
                 } footer: {
                     attribution(context: context, requirements: requirements, hintsAtDragging: presentation == .pane && audit.satisfiedCount < audit.totalCount)

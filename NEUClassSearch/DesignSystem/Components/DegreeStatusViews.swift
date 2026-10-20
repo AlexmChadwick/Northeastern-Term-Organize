@@ -93,6 +93,8 @@ struct DegreeRequirementsSummary: View {
     var audit: DegreeAudit
     /// How many open requirements to list by name (0 for none).
     var openItemLimit = 0
+    /// Replaces the green “On track…” line when a semester at or before the finish can't be taken.
+    var blockedFinish: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
@@ -113,7 +115,12 @@ struct DegreeRequirementsSummary: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
-                if let milestone = context.milestone {
+                if let blockedFinish {
+                    Label(blockedFinish, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let milestone = context.milestone {
                     Label(milestone.summaryLine, systemImage: "graduationcap.fill")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(.green)

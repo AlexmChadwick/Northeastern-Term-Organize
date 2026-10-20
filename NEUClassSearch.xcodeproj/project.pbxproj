@@ -73,6 +73,24 @@
 			);
 			target = 7A0000000000000000000040 /* NEUClassSearch */;
 		};
+		7A0000000000000000000075 /* Exceptions for "TermOrganizeKit" folder in "NEUClassSearch" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				MCP/MCPServer.swift,
+				MCP/MCPCatalog.swift,
+				MCP/MCPPlans.swift,
+			);
+			target = 7A0000000000000000000040 /* NEUClassSearch */;
+		};
+		7A0000000000000000000076 /* Exceptions for "TermOrganizeKit" folder in "NEUClassSearchMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				MCP/MCPServer.swift,
+				MCP/MCPCatalog.swift,
+				MCP/MCPPlans.swift,
+			);
+			target = 7A0000000000000000000043 /* NEUClassSearchMac */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -97,6 +115,15 @@
 		7A0000000000000000000013 /* Tools */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Tools;
+			sourceTree = "<group>";
+		};
+		7A0000000000000000000017 /* TermOrganizeKit */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7A0000000000000000000075 /* Exceptions for "TermOrganizeKit" folder in "NEUClassSearch" target */,
+				7A0000000000000000000076 /* Exceptions for "TermOrganizeKit" folder in "NEUClassSearchMac" target */,
+			);
+			path = TermOrganizeKit/Sources/TermOrganizeKit;
 			sourceTree = "<group>";
 		};
 		7A0000000000000000000014 /* NEUClassSearchTests */ = {
@@ -164,6 +191,7 @@
 				7A0000000000000000000011 /* NEUClassSearchWidgets */,
 				7A0000000000000000000014 /* NEUClassSearchTests */,
 				7A0000000000000000000013 /* Tools */,
+				7A0000000000000000000017 /* TermOrganizeKit */,
 				7A0000000000000000000020 /* README.md */,
 				7A0000000000000000000022 /* NOTICE.md */,
 				7A0000000000000000000021 /* LICENSE */,
@@ -203,6 +231,7 @@
 				7A0000000000000000000010 /* NEUClassSearch */,
 				7A0000000000000000000012 /* Shared */,
 				7A0000000000000000000016 /* NEUClassSearchiOS */,
+				7A0000000000000000000017 /* TermOrganizeKit */,
 			);
 			name = NEUClassSearch;
 			packageProductDependencies = (
@@ -273,6 +302,7 @@
 				7A0000000000000000000010 /* NEUClassSearch */,
 				7A0000000000000000000012 /* Shared */,
 				7A0000000000000000000015 /* NEUClassSearchMac */,
+				7A0000000000000000000017 /* TermOrganizeKit */,
 			);
 			name = NEUClassSearchMac;
 			packageProductDependencies = (

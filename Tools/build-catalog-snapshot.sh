@@ -21,7 +21,7 @@ BUILD_DIR="${TMPDIR:-/tmp}/neu-catalog-snapshot"
 mkdir -p "$BUILD_DIR"
 
 SOURCES=()
-while IFS= read -r -d '' file; do SOURCES+=("$file"); done < <(find "$ROOT/NEUClassSearch/Core" -name '*.swift' -print0)
+while IFS= read -r -d '' file; do SOURCES+=("$file"); done < <(find "$ROOT/TermOrganizeKit/Sources/TermOrganizeKit/Core" -name '*.swift' -print0)
 
 echo "Compiling catalog-snapshot (${#SOURCES[@]} core files)…"
 # macOS has Apple's LZFSE in Foundation. Linux swiftc emits plain JSON; the file is

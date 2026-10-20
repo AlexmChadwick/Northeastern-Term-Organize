@@ -44,9 +44,18 @@ enum AppPaths {
 
     /// Catalog snapshots shipped inside the app bundle.
     static var bundledCatalogURLs: [URL] {
+        #if canImport(Darwin)
         let urls = Bundle.main.urls(forResourcesWithExtension: CatalogArchive.fileExtension, subdirectory: nil) ?? []
         let nested = Bundle.main.urls(forResourcesWithExtension: CatalogArchive.fileExtension, subdirectory: "Catalog") ?? []
-        return Array(Set(urls + nested))
+        var seen = Set<String>()
+        var unique: [URL] = []
+        for url in urls + nested where seen.insert(url.path).inserted {
+            unique.append(url)
+        }
+        return unique
+        #else
+        return []
+        #endif
     }
 
     /// The user's plans, watchlist, bookmarks and preferences.
@@ -54,6 +63,10 @@ enum AppPaths {
 
     /// Shared container for data the widget reads, if the app group is available.
     static var sharedContainer: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+        #if canImport(Darwin)
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+        #else
+        return nil
+        #endif
     }
 }

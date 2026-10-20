@@ -207,7 +207,7 @@ xcodebuild test -project NEUClassSearch.xcodeproj -scheme NEUClassSearch -destin
 Open `NEUClassSearch.xcodeproj`, choose the **NEUClassSearch** scheme and run. For a
 device build, set your development team under *Signing & Capabilities* for both the app
 and the `NEUClassSearchWidgets` extension, and change the bundle identifiers / app group
-(`group.com.alexchadwick.neuclasssearch`, also referenced in `NEUClassSearch/Services/AppPaths.swift`
+(`group.com.alexchadwick.neuclasssearch`, also referenced in `TermOrganizeKit/Sources/TermOrganizeKit/Services/AppPaths.swift`
 and `Shared/WidgetScheduleData.swift`) if needed.
 
 For the Mac, choose the **NEUClassSearchMac** scheme. To build it without a development
@@ -218,6 +218,61 @@ entitlements in `NEUClassSearchMac/NEUClassSearchMac-Local.entitlements`:
 xcodebuild -project NEUClassSearch.xcodeproj -scheme NEUClassSearchMac -configuration Debug -destination 'platform=macOS' CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= CODE_SIGN_ENTITLEMENTS=NEUClassSearchMac/NEUClassSearchMac-Local.entitlements build
 ```
 
+## Local MCP server
+
+`term-organize-mcp` is a local stdio server for the two catalogs bundled with the app
+(Fall 2026 `202710` and Spring 2027 `202730`) and for the schedule plans stored in
+`UserData.json`. It does not use the network. It is unofficial and not affiliated with
+Northeastern University. Tool names, JSON shapes, the plan file, and the read-only
+switch are in [`docs/MCP.md`](docs/MCP.md).
+
+Build it with Swift 6.2 or newer (the package declares a macOS 26 deployment target):
+
+```bash
+cd TermOrganizeKit
+swift build -c release
+```
+
+The binary is `TermOrganizeKit/.build/release/term-organize-mcp`. Pass `--read-only`,
+or set `TERM_ORGANIZE_MCP_READONLY=1`, to hide every tool that writes a plan.
+`list_plans` and `get_plan` stay available.
+
+Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "term-organize": {
+      "command": "/ABSOLUTE/PATH/TermOrganizeKit/.build/release/term-organize-mcp"
+    }
+  }
+}
+```
+
+Cursor (`.cursor/mcp.json` in this repo, or the user MCP config):
+
+```json
+{
+  "mcpServers": {
+    "term-organize": {
+      "command": "/ABSOLUTE/PATH/TermOrganizeKit/.build/release/term-organize-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+To start it read-only, add `"args": ["--read-only"]`.
+
+On a Mac where Term Organize has been launched, the server reads and writes the sandboxed
+app's existing file,
+`~/Library/Containers/com.alexchadwick.neuclasssearch/Data/Library/Application Support/UserData.json`.
+The app sandbox is unchanged. See [`docs/MCP.md`](docs/MCP.md) for why the server is a
+separate unsandboxed process, and for the case where the app still has an unsaved edit.
+
+Run the server tests with `cd TermOrganizeKit && swift test`. They use a temporary
+`UserData.json` and never the real plans file.
+
 ## Regenerating the bundled catalog
 
 ```bash
@@ -225,7 +280,7 @@ Tools/build-catalog-snapshot.sh            # newest term Banner lists
 Tools/build-catalog-snapshot.sh 202730     # a specific term (e.g. Spring 2027)
 ```
 
-The script compiles a small command-line tool from the app's own `Core` sources and scrapes
+The script compiles a small command-line tool from `TermOrganizeKit/Sources/TermOrganizeKit/Core` and scrapes
 the term the same way SearchNEU's scraper does (sections, instructors, descriptions,
 requisites, catalog titles) with modest request concurrency. Instructor email addresses are
 kept only when the domain is `northeastern.edu` or `neu.edu`. A full term takes about
@@ -237,18 +292,21 @@ same LZFSE catalog the Mac build writes.
 ## Project structure
 
 ```
-NEUClassSearch/         Shared core, compiled into both apps
-  Core/                 Foundation-only models, Banner client & parsers, catalog archive,
-                        academic catalog parser (shared with the command-line snapshot tool)
-  Services/             Catalog repository/store, on-device search engine, user data store,
-                        iCloud sync (CloudSync/), Spotlight
-  Logic/                Platform-neutral app logic: degree audit and plan PDFs, schedule
-                        generator, preferences and the Apple Intelligence assistant, rooms,
-                        watchlist, legal text
+TermOrganizeKit/        Swift package: shared Foundation code and the local MCP server
+  Package.swift
+  Sources/TermOrganizeKit/
+    Core/               Models, Banner client and parsers, catalog archive
+    Logic/              Degree-plan and schedule logic shared with the apps
+    Services/           Search, user models, UserData.json read and write
+    MCP/                stdio server (excluded from the iOS and Mac app targets)
+  Sources/TermOrganizeMCP/   term-organize-mcp executable
+  Tests/TermOrganizeMCPTests/
+NEUClassSearch/         App-only sources, compiled into both apps, plus resources
+  Core/, Logic/, Services/   Sources that stay in the app (CloudKit, Spotlight, PDF, assistant)
   DesignSystem/         Theme, badges, Liquid Glass chips, week calendar, course rows
-  Resources/            Asset catalog, Icon Composer app icon, catalog snapshot, license text
-NEUClassSearchiOS/      iPhone & iPad interface
-  App/                  App entry, root TabView, router & deep links (termorganize://)
+  Resources/            Asset catalog, app icon, catalog snapshots, license text
+NEUClassSearchiOS/      iPhone and iPad interface
+  App/                  App entry, root TabView, router and deep links (termorganize://)
   Features/             Home, Search, Course, Professors, Schedule, DegreePlan, Watchlist,
                         Rooms, Settings, Onboarding
 NEUClassSearchMac/      Mac interface: sidebar window, course and professor windows, menu
@@ -257,6 +315,7 @@ NEUClassSearchWidgets/  WidgetKit extension (Up Next, Class Agenda)
 Shared/                 Code compiled into the apps and the widgets
 NEUClassSearchTests/    Swift Testing suites
 Tools/                  Catalog snapshot tool and build script
+docs/MCP.md             MCP tool names and JSON shapes
 ```
 
 ## License & attribution

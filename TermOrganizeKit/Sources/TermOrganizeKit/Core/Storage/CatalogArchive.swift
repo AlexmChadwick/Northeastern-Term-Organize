@@ -55,7 +55,7 @@ enum CatalogArchive {
             #if canImport(Compression)
             json = try (data as NSData).decompressed(using: .lzfse) as Data
             #else
-            throw Error.lzfseUnavailable
+            json = try decompressLZFSE(data)
             #endif
         }
         let decoder = JSONDecoder()
@@ -66,6 +66,36 @@ enum CatalogArchive {
     static func read(from url: URL) throws -> TermCatalog {
         try decode(Data(contentsOf: url, options: .mappedIfSafe))
     }
+
+    #if !canImport(Compression)
+    /// The `lzfse` reference tool writes the same stream Apple's Compression framework reads.
+    private static func decompressLZFSE(_ data: Data) throws -> Data {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/local/bin/lzfse")
+        if !FileManager.default.isExecutableFile(atPath: process.executableURL!.path) {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/lzfse")
+        }
+        guard FileManager.default.isExecutableFile(atPath: process.executableURL!.path) else {
+            throw Error.lzfseUnavailable
+        }
+        process.arguments = ["-decode"]
+        let input = Pipe()
+        let output = Pipe()
+        let errors = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = errors
+        try process.run()
+        input.fileHandleForWriting.write(data)
+        try input.fileHandleForWriting.close()
+        let decoded = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0, decoded.first == UInt8(ascii: "{") else {
+            throw Error.lzfseUnavailable
+        }
+        return decoded
+    }
+    #endif
 
     static func write(_ catalog: TermCatalog, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

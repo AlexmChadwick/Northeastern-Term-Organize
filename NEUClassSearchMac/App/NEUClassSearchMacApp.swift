@@ -87,6 +87,7 @@ struct NEUClassSearchMacApp: App {
                 userData.flushNow()
                 CloudSyncController.shared.appDidEnterBackground()
             case .active:
+                userData.reloadExternalChanges()
                 CloudSyncController.shared.appDidBecomeActive()
             @unknown default:
                 break

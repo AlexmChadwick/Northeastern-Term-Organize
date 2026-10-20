@@ -79,6 +79,7 @@ struct NEUClassSearchApp: App {
                 CloudSyncController.shared.appDidEnterBackground()
                 WatchlistService.scheduleBackgroundRefresh(enabled: userData.preferences.backgroundRefreshEnabled && !userData.watchlist.isEmpty)
             case .active:
+                userData.reloadExternalChanges()
                 Task { await WatchlistService.shared.refreshIfStale() }
                 CloudSyncController.shared.appDidBecomeActive()
             default:

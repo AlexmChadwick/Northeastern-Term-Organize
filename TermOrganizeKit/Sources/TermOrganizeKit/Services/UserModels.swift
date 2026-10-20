@@ -92,6 +92,12 @@ struct SchedulePlan: Codable, Hashable, Identifiable, Sendable {
     var isPrimary = false
     var createdAt = Date.now
     var updatedAt = Date.now
+    /// Optimistic concurrency token. Nil on plans saved before it existed (treated as 0).
+    /// Incremented on every saved edit. Optional so older files still decode.
+    var revision: Int?
+    /// Schedule plans that belong to one multi-term plan share this id. Nil means the
+    /// plan stands alone (one term), which is how the app itself creates schedules.
+    var folderID: UUID?
 
     func contains(_ key: CourseKey) -> Bool { courses.contains { $0.key == key } }
 

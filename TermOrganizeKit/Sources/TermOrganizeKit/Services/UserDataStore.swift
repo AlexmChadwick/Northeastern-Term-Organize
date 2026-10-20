@@ -42,12 +42,7 @@ final class UserDataStore {
 
     init(fileURL: URL = AppPaths.userDataURL) {
         self.fileURL = fileURL
-        let stored: UserData
-        if let raw = try? Data(contentsOf: fileURL), let decoded = try? JSONDecoder.userData.decode(UserData.self, from: raw) {
-            stored = decoded
-        } else {
-            stored = UserData()
-        }
+        let stored = (try? UserDataFile.read(from: fileURL)) ?? UserData()
         preferences = stored.preferences
         saved = stored.saved
         recents = stored.recents
@@ -141,6 +136,7 @@ final class UserDataStore {
         var plan = SchedulePlan(name: name, termCode: termCode)
         // The first plan of a term becomes the primary schedule.
         plan.isPrimary = !plans.contains { $0.termCode == termCode }
+        plan.revision = 1
         plans.append(plan)
         plansDidChange()
         return plan
@@ -151,6 +147,7 @@ final class UserDataStore {
         guard let i = plans.firstIndex(where: { $0.id == plan.id }) else { return }
         var updated = plan
         updated.updatedAt = .now
+        updated.revision = (plans[i].revision ?? 0) + 1
         plans[i] = updated
         plansDidChange()
     }
@@ -158,8 +155,11 @@ final class UserDataStore {
     /// Mutates a plan in place.
     func updatePlan(id: UUID, _ change: (inout SchedulePlan) -> Void) {
         guard let i = plans.firstIndex(where: { $0.id == id }) else { return }
+        let before = plans[i]
         change(&plans[i])
+        guard plans[i] != before else { return }
         plans[i].updatedAt = .now
+        plans[i].revision = (before.revision ?? 0) + 1
         plansDidChange()
     }
 
@@ -188,7 +188,12 @@ final class UserDataStore {
     func setPrimary(id: UUID) {
         guard let target = plan(id: id) else { return }
         for i in plans.indices where plans[i].termCode == target.termCode {
-            plans[i].isPrimary = plans[i].id == id
+            let primary = plans[i].id == id
+            if plans[i].isPrimary != primary {
+                plans[i].isPrimary = primary
+                plans[i].revision = (plans[i].revision ?? 0) + 1
+                plans[i].updatedAt = .now
+            }
         }
         plansDidChange()
     }
@@ -358,14 +363,33 @@ final class UserDataStore {
         onPlansChanged?()
     }
 
+    /// True while a local edit is waiting to be written. External reloads wait for it.
+    @ObservationIgnored private var hasPendingLocalEdit = false
+
     private func scheduleSave() {
         if !isApplyingRemoteChanges { hasUnreportedChanges = true }
+        if !isApplyingRemoteChanges { hasPendingLocalEdit = true }
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
             guard !Task.isCancelled else { return }
             self?.flush()
         }
+    }
+
+    /// Picks up plan edits made by the local MCP server while this process is open.
+    /// Does nothing while a local edit is still waiting to be saved, so the app's
+    /// own change is not replaced by a file it has not written yet.
+    func reloadExternalChanges() {
+        guard !hasPendingLocalEdit, !isApplyingRemoteChanges else { return }
+        guard let stored = try? UserDataFile.read(from: fileURL) else { return }
+        let disk = stored.plans.map { ($0.id, $0.revision ?? 0, $0.updatedAt) }
+        let local = plans.map { ($0.id, $0.revision ?? 0, $0.updatedAt) }
+        guard disk.map(\.0) != local.map(\.0) || disk.map(\.1) != local.map(\.1) || disk.map(\.2) != local.map(\.2) else { return }
+        isApplyingRemoteChanges = true
+        plans = stored.plans
+        isApplyingRemoteChanges = false
+        onPlansChanged?()
     }
 
     /// Writes synchronously on the calling (main) actor. Use when the process may be
@@ -381,9 +405,9 @@ final class UserDataStore {
         saveTask = nil
         let snapshot = data
         let url = fileURL
+        hasPendingLocalEdit = false
         Task.detached(priority: .utility) {
-            guard let encoded = try? JSONEncoder.userData.encode(snapshot) else { return }
-            try? encoded.write(to: url, options: .atomic)
+            try? UserDataFile.write(snapshot, to: url)
         }
         reportChanges()
     }
@@ -391,8 +415,8 @@ final class UserDataStore {
     private func writeNow() {
         saveTask?.cancel()
         saveTask = nil
-        guard let encoded = try? JSONEncoder.userData.encode(data) else { return }
-        try? encoded.write(to: fileURL, options: .atomic)
+        hasPendingLocalEdit = false
+        try? UserDataFile.write(data, to: fileURL)
     }
 
     private func reportChanges() {
@@ -424,18 +448,3 @@ final class UserDataStore {
     }
 }
 
-extension JSONEncoder {
-    static var userData: JSONEncoder {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        return e
-    }
-}
-
-extension JSONDecoder {
-    static var userData: JSONDecoder {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }
-}

@@ -11,6 +11,16 @@ import Foundation
 
 /// Serializes term catalogs as LZFSE-compressed JSON (`.catalog` files).
 enum CatalogArchive {
+    enum Error: Swift.Error, LocalizedError {
+        /// Linux builds of the snapshot tool have no Apple Compression framework.
+        /// The build script compresses the JSON with the lzfse reference library instead.
+        case lzfseUnavailable
+
+        var errorDescription: String? {
+            "LZFSE decompression isn't available in this build."
+        }
+    }
+
     static let fileExtension = "catalog"
 
     static func fileName(forTerm code: String) -> String { "term-\(code).\(fileExtension)" }
@@ -26,7 +36,15 @@ enum CatalogArchive {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         let json = try encoder.encode(catalog)
+        // Apple's Compression framework (LZFSE) is what the bundled `.catalog` files use.
+        // On platforms without it, the JSON is returned as-is; `decode` accepts that, and
+        // `Tools/build-catalog-snapshot.sh` compresses it with the lzfse reference library
+        // so the file on disk matches the Apple format.
+        #if canImport(Compression)
         return try (json as NSData).compressed(using: .lzfse) as Data
+        #else
+        return json
+        #endif
     }
 
     static func decode(_ data: Data) throws -> TermCatalog {
@@ -34,7 +52,11 @@ enum CatalogArchive {
         if data.first == UInt8(ascii: "{") {
             json = data
         } else {
+            #if canImport(Compression)
             json = try (data as NSData).decompressed(using: .lzfse) as Data
+            #else
+            throw Error.lzfseUnavailable
+            #endif
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970

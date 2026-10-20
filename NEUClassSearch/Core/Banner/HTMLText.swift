@@ -66,9 +66,12 @@ enum HTMLText {
         s = s.replacingOccurrences(of: "</p>", with: "\n", options: .caseInsensitive)
         s = s.replacingOccurrences(of: "<[^>]*>", with: "", options: .regularExpression)
         s = decodeEntities(decodeEntities(s))
-        // Collapse runs of spaces/tabs, keep single newlines.
+        // Collapse runs of spaces, tabs and non-breaking spaces; keep single newlines.
+        // The non-breaking space is a literal character: `\u{00A0}` is not valid in an ICU
+        // regular expression, and swift-foundation on Linux replaces the whole string when
+        // `replacingOccurrences` is given a pattern that does not compile.
         let lines = s.components(separatedBy: .newlines)
-            .map { $0.replacingOccurrences(of: "[ \\t\\u{00A0}]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces) }
+            .map { $0.replacingOccurrences(of: "[ \\t\u{00A0}]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces) }
         var result: [String] = []
         for line in lines {
             if line.isEmpty, result.last?.isEmpty ?? true { continue }

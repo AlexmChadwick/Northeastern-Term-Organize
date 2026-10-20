@@ -24,9 +24,22 @@ SOURCES=()
 while IFS= read -r -d '' file; do SOURCES+=("$file"); done < <(find "$ROOT/NEUClassSearch/Core" -name '*.swift' -print0)
 
 echo "Compiling catalog-snapshot (${#SOURCES[@]} core files)…"
-xcrun --sdk macosx swiftc -O -swift-version 5 \
-  "${SOURCES[@]}" "$ROOT/Tools/CatalogSnapshot/main.swift" \
-  -o "$BUILD_DIR/catalog-snapshot"
+# macOS has Apple's LZFSE in Foundation. Linux swiftc emits plain JSON; the file is
+# compressed afterwards with the lzfse reference library, which decodes with the same
+# LZFSE stream the apps and the Linux/Windows ports already read.
+if command -v xcrun >/dev/null 2>&1 && xcrun --sdk macosx --show-sdk-path >/dev/null 2>&1; then
+  xcrun --sdk macosx swiftc -O -swift-version 5 \
+    "${SOURCES[@]}" "$ROOT/Tools/CatalogSnapshot/main.swift" \
+    -o "$BUILD_DIR/catalog-snapshot"
+  COMPRESS_JSON=0
+else
+  command -v swiftc >/dev/null 2>&1 || { echo "swiftc not found (Xcode on macOS, or a Swift toolchain on Linux)." >&2; exit 1; }
+  command -v lzfse >/dev/null 2>&1 || { echo "lzfse not found. Install https://github.com/lzfse/lzfse so the snapshot can be compressed." >&2; exit 1; }
+  swiftc -O -swift-version 5 \
+    "${SOURCES[@]}" "$ROOT/Tools/CatalogSnapshot/main.swift" \
+    -o "$BUILD_DIR/catalog-snapshot"
+  COMPRESS_JSON=1
+fi
 
 TERM_CODE="${1:-}"
 if [[ -z "$TERM_CODE" || "$TERM_CODE" == --* ]]; then
@@ -38,3 +51,14 @@ fi
 
 echo "Building snapshot for term $TERM_CODE…"
 "$BUILD_DIR/catalog-snapshot" "$TERM_CODE" --out "$ROOT/NEUClassSearch/Resources/Catalog" "$@"
+
+OUT_FILE="$ROOT/NEUClassSearch/Resources/Catalog/term-${TERM_CODE}.catalog"
+if [[ "${COMPRESS_JSON:-0}" == 1 && -f "$OUT_FILE" ]]; then
+  first="$(head -c 1 "$OUT_FILE" || true)"
+  if [[ "$first" == "{" ]]; then
+    echo "Compressing $OUT_FILE with lzfse…"
+    tmp="$(mktemp)"
+    lzfse -encode -i "$OUT_FILE" -o "$tmp"
+    mv "$tmp" "$OUT_FILE"
+  fi
+fi

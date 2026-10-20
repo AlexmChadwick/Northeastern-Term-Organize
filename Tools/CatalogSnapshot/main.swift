@@ -213,5 +213,13 @@ let size = (try? FileManager.default.attributesOfItem(atPath: outURL.path)[.size
 let detailed = catalog.courses.filter(\.detailsLoaded).count
 log("Wrote \(outURL.path) (\(size / 1024) KB)")
 log("\(catalog.courses.count) courses (\(detailed) with details), \(catalog.sections.count) sections")
+log("Instructor emails: kept northeastern.edu and neu.edu only; dropped \(InstructorEmail.droppedCount) other addresses (\(InstructorEmail.droppedUniqueCount) unique)")
+let droppedDomains = InstructorEmail.droppedDomains.sorted { lhs, rhs in
+    if lhs.value != rhs.value { return lhs.value > rhs.value }
+    return lhs.key < rhs.key
+}
+if !droppedDomains.isEmpty {
+    log("Dropped email domains: \(droppedDomains.map { "\($0.key) \($0.value)" }.joined(separator: ", "))")
+}
 log("\(failures.count) failed requests; elapsed \(Int(Date.now.timeIntervalSince(started)))s")
 for f in failures.prefix(25) { log("  ! \(f)") }

@@ -161,7 +161,68 @@ extension BannerMeetingTime {
 extension BannerFaculty {
     func toInstructor() -> Instructor? {
         guard let name = displayName.map({ HTMLText.decodeEntities(HTMLText.decodeEntities($0)) })?.nilIfBlank else { return nil }
-        return Instructor(name: name, primary: primaryIndicator ?? false, email: emailAddress?.nilIfBlank)
+        return Instructor(name: name, primary: primaryIndicator ?? false, email: InstructorEmail.institutional(emailAddress))
+    }
+}
+
+/// Instructor addresses kept from Banner. Only Northeastern's own domains stay;
+/// every other address is dropped, and nothing here is a student's personal data.
+enum InstructorEmail {
+    private static let lock = NSLock()
+    private static var droppedOccurrences = 0
+    private static var droppedUnique = Set<String>()
+    private static var droppedDomainCounts: [String: Int] = [:]
+
+    /// How many non-institutional addresses `institutional(_:)` has discarded.
+    static var droppedCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return droppedOccurrences
+    }
+
+    /// Distinct discarded addresses (the same mailbox on many sections counts once).
+    static var droppedUniqueCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return droppedUnique.count
+    }
+
+    /// Discarded addresses grouped by domain, for a build log. Local parts are not kept.
+    static var droppedDomains: [String: Int] {
+        lock.lock(); defer { lock.unlock() }
+        return droppedDomainCounts
+    }
+
+    /// `user@northeastern.edu` and `user@neu.edu` only. Subdomains (including
+    /// `husky.neu.edu`) and every other host are dropped. Matching is case-insensitive
+    /// on the domain; the local part is left as Banner wrote it.
+    static func institutional(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        let email: String
+        if let open = trimmed.firstIndex(of: "<"),
+           let close = trimmed[open...].firstIndex(of: ">"),
+           trimmed.index(after: open) < close {
+            email = trimmed[trimmed.index(after: open)..<close].trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            email = trimmed
+        }
+        guard !email.isEmpty, let at = email.lastIndex(of: "@"), at != email.startIndex, email.index(after: at) < email.endIndex else {
+            recordDrop(email.isEmpty ? trimmed : email)
+            return nil
+        }
+        let domain = String(email[email.index(after: at)...]).lowercased()
+        guard domain == "northeastern.edu" || domain == "neu.edu" else {
+            recordDrop(email, domain: domain)
+            return nil
+        }
+        return email
+    }
+
+    private static func recordDrop(_ email: String, domain: String? = nil) {
+        let host = domain ?? email.split(separator: "@").last.map { String($0).lowercased() } ?? "(invalid)"
+        lock.lock()
+        droppedOccurrences += 1
+        droppedUnique.insert(email.lowercased())
+        droppedDomainCounts[host, default: 0] += 1
+        lock.unlock()
     }
 }
 

@@ -191,29 +191,37 @@ enum InstructorEmail {
         return droppedDomainCounts
     }
 
-    /// `user@northeastern.edu` and `user@neu.edu` only. Subdomains (including
-    /// `husky.neu.edu`) and every other host are dropped. Matching is case-insensitive
-    /// on the domain; the local part is left as Banner wrote it.
+    /// Addresses whose domain is exactly `northeastern.edu` or `neu.edu`.
+    /// Banner sometimes puts two addresses in one field, separated by a space
+    /// (`person@gmail.com person@northeastern.edu`). Each address is judged on its
+    /// own; the field keeps only the institutional ones, in the order Banner listed
+    /// them, and is dropped when none remain. Subdomains (including `husky.neu.edu`)
+    /// are not kept. Domain matching is case-insensitive; the local part is left
+    /// as Banner wrote it.
     static func institutional(_ raw: String?) -> String? {
         guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
-        let email: String
-        if let open = trimmed.firstIndex(of: "<"),
-           let close = trimmed[open...].firstIndex(of: ">"),
-           trimmed.index(after: open) < close {
-            email = trimmed[trimmed.index(after: open)..<close].trimmingCharacters(in: .whitespacesAndNewlines)
-        } else {
-            email = trimmed
-        }
-        guard !email.isEmpty, let at = email.lastIndex(of: "@"), at != email.startIndex, email.index(after: at) < email.endIndex else {
-            recordDrop(email.isEmpty ? trimmed : email)
+        let found = addresses(in: trimmed)
+        if found.isEmpty {
+            recordDrop(trimmed)
             return nil
         }
-        let domain = String(email[email.index(after: at)...]).lowercased()
-        guard domain == "northeastern.edu" || domain == "neu.edu" else {
-            recordDrop(email, domain: domain)
-            return nil
+        var kept: [String] = []
+        for address in found {
+            let domain = String(address[address.index(after: address.lastIndex(of: "@")!)...]).lowercased()
+            if domain == "northeastern.edu" || domain == "neu.edu" {
+                kept.append(address)
+            } else {
+                recordDrop(address, domain: domain)
+            }
         }
-        return email
+        guard !kept.isEmpty else { return nil }
+        return kept.joined(separator: " ")
+    }
+
+    /// Email addresses in `text`, in order. A display name around an address
+    /// (`Ada Lovelace <ada@northeastern.edu>`) is not itself an address.
+    private static func addresses(in text: String) -> [String] {
+        text.matches(of: #/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/#).map { String($0.output) }
     }
 
     private static func recordDrop(_ email: String, domain: String? = nil) {

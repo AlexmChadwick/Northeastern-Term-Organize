@@ -90,6 +90,11 @@ struct CoreModelTests {
         #expect(faculty("not-an-email").toInstructor()?.email == nil)
         #expect(faculty("   ").toInstructor()?.email == nil)
         #expect(faculty("ada@gmail.com").toInstructor()?.name == "Ada, Lovelace")
+        // One field can list a personal address beside a Northeastern one.
+        #expect(faculty("ada@gmail.com ada@northeastern.edu").toInstructor()?.email == "ada@northeastern.edu")
+        #expect(faculty("ada@kent.edu ada@neu.edu").toInstructor()?.email == "ada@neu.edu")
+        #expect(faculty("a@gmail.com b@kent.edu").toInstructor()?.email == nil)
+        #expect(faculty("a@northeastern.edu b@neu.edu").toInstructor()?.email == "a@northeastern.edu b@neu.edu")
     }
 
     @Test func catalogArchiveRoundTrip() throws {

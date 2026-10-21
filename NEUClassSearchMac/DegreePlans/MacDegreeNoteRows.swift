@@ -12,7 +12,7 @@ import SwiftUI
 /// A requirement the catalog states as a sentence ("Complete 72 semester hours in the major",
 /// "… is satisfied through co-op", the NUpath requirements). When the plan can be checked against
 /// it, the row shows how it stands, like any requirement: a status icon, how far the plan gets
-/// (`102 of 72 semester hours · 56 planned`) and, for a sentence made of several parts, each
+/// (`46 of 72 semester hours · 56 planned`) and, for a sentence made of several parts, each
 /// part. A sentence the plan can't answer (the GPA, where credits were earned) says it isn't
 /// checked, and why when the audit knows. A check that can't tell yet (NUpath data still being
 /// looked up) shows what it found in neutral colors.

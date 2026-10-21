@@ -615,7 +615,10 @@ struct DegreeRequirementsTests {
         #expect(done.satisfiedCount == done.totalCount)
 
         let short = audit(["CS 3000", "CS 3200", "CS 1210"], planned: ["CS 3500"])
-        #expect(short.noteChecks.first { if case .majorHours = $0.kind { true } else { false } }?.status == .partial)
+        let shortHours = try #require(short.noteChecks.first { if case .majorHours = $0.kind { true } else { false } })
+        // 4 (CS 3000) + 4 (CS 3200) earned, 4 (CS 3500) planned. Not 12 of 16 with the 4 planned again.
+        #expect(shortHours.status == .partial)
+        #expect(shortHours.detail == "8 of 16 semester hours · 4 planned")
         #expect(short.noteChecks.first { if case .coop = $0.kind { true } else { false } }?.detail == "No co-op in the plan")
         #expect(short.satisfiedCount < short.totalCount)
     }

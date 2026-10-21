@@ -325,14 +325,29 @@ struct DegreePlanCourse: Codable, Hashable, Identifiable, Sendable {
     /// Title as written in the plan (the degree audit uses Banner's 30-character short titles).
     var title: String
     var credits: Double
+    /// The section chosen for this row. Two rows may share a subject and number
+    /// only when each has its own CRN. Nil when no section has been chosen.
+    /// Optional so plans saved before the field existed still decode.
+    var crn: String?
 
-    init(id: UUID = UUID(), key: CourseKey?, label: String? = nil, title: String, credits: Double) {
+    init(id: UUID = UUID(), key: CourseKey?, label: String? = nil, title: String, credits: Double, crn: String? = nil) {
         self.id = id
         self.key = key
         self.label = label ?? key?.description ?? ""
         self.title = title
         self.credits = credits
+        self.crn = crn
     }
+}
+
+/// What `DegreePlanTerm.include` did with one course row.
+enum DegreeCourseAdmission: Equatable, Sendable {
+    /// A new row was appended.
+    case added
+    /// The CRN was stored on a row that did not have one yet.
+    case pinnedExisting
+    /// The number was already present, or this CRN was already stored.
+    case alreadyPresent
 }
 
 /// One semester of planned courses.
@@ -347,6 +362,36 @@ struct DegreePlanTerm: Codable, Hashable, Identifiable, Sendable {
     /// e.g. `Summer A 2027`.
     var shortName: String { "\(season.shortName) \(year)" }
     var credits: Double { courses.reduce(0) { $0 + $1.credits } }
+
+    /// Adds a row, or stores `crn` on the one row of that course that does not
+    /// have one yet. A second row is created only when the new course has a CRN,
+    /// every existing row of that subject and number already has a different CRN,
+    /// and this CRN is not already stored. A missing CRN never creates a second row.
+    @discardableResult
+    mutating func include(course newCourse: DegreePlanCourse) -> DegreeCourseAdmission {
+        guard let key = newCourse.key else {
+            courses.append(newCourse)
+            return .added
+        }
+        let trimmed = newCourse.crn?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pin = (trimmed?.isEmpty == false) ? trimmed : nil
+        let rows = courses.indices.filter { courses[$0].key == key }
+        if pin == nil {
+            guard rows.isEmpty else { return .alreadyPresent }
+            courses.append(newCourse)
+            return .added
+        }
+        if rows.contains(where: { courses[$0].crn == pin }) { return .alreadyPresent }
+        if let open = rows.first(where: { courses[$0].crn?.isEmpty != false }) {
+            courses[open].crn = pin
+            return .pinnedExisting
+        }
+        var copy = newCourse
+        copy.crn = pin
+        courses.append(copy)
+        return .added
+    }
+
     /// Months since year 0, used for ordering and "closest term" comparisons.
     var monthIndex: Int { year * 12 + season.startMonth - 1 }
     var sortKey: Int { monthIndex * 4 + season.orderWithinMonth }
@@ -379,6 +424,10 @@ struct DegreePlan: Codable, Hashable, Identifiable, Sendable {
     var printedAt: Date?
     var createdAt = Date.now
     var updatedAt = Date.now
+    /// Optimistic concurrency token. Nil or 0 on plans saved before it existed
+    /// (both count as 1). Incremented on every saved edit. Optional so older
+    /// files still decode.
+    var revision: Int?
 
     // Degree requirements (from the academic catalog). All optional: a plan works without them.
 
@@ -433,6 +482,7 @@ extension DegreePlan {
         printedAt = try c.decodeIfPresent(Date.self, forKey: .printedAt)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
+        revision = try c.decodeIfPresent(Int.self, forKey: .revision)
         catalogYear = try c.decodeIfPresent(Int.self, forKey: .catalogYear)
         catalogProgramPath = try c.decodeIfPresent(String.self, forKey: .catalogProgramPath)
         catalogProgramTitle = try c.decodeIfPresent(String.self, forKey: .catalogProgramTitle)

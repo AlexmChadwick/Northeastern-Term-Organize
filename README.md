@@ -221,8 +221,9 @@ xcodebuild -project NEUClassSearch.xcodeproj -scheme NEUClassSearchMac -configur
 ## Local MCP server
 
 `term-organize-mcp` is a local stdio server for the two catalogs bundled with the app
-(Fall 2026 `202710` and Spring 2027 `202730`) and for the schedule plans stored in
-`UserData.json`. It does not use the network. It is unofficial and not affiliated with
+(Fall 2026 `202710` and Spring 2027 `202730`) and for the degree plans stored in
+`UserData.json`. Schedules are listed separately and are not what the write tools edit.
+It does not use the network. It is unofficial and not affiliated with
 Northeastern University. Tool names, JSON shapes, the plan file, and the read-only
 switch are in [`docs/MCP.md`](docs/MCP.md).
 

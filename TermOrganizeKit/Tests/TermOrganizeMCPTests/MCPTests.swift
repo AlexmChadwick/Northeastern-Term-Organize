@@ -257,7 +257,14 @@ struct MCPToolTests {
         #expect(added["revision"] as? Int == 2)
         let listed = try call("list_plans", [:])
         let plans = listed["plans"] as? [[String: Any]] ?? []
-        #expect(plans.contains { $0["id"] as? String == id && ($0["terms"] as? [String]) == ["202730"] })
+        let match = plans.first { $0["id"] as? String == id }
+        let listedTerms = match?["terms"] as? [[String: Any]]
+        #expect(listedTerms?.map { $0["term"] as? String } == ["202730"])
+        #expect(listedTerms?.map { $0["name"] as? String } == ["Spring 2027"])
+        #expect(match?["updated_at"] != nil)
+        #expect(match?["updated"] == nil)
+        #expect(match?["revision"] as? Int == 2)
+        #expect((listed["schedules"] as? [Any])?.isEmpty == true)
         let loaded = try call("get_plan", ["plan_id": id])
         let terms = loaded["terms"] as? [[String: Any]] ?? []
         let courses = terms.first?["courses"] as? [[String: Any]] ?? []
@@ -410,6 +417,59 @@ struct MCPToolTests {
         #expect(appliedTopics.count == 2)
     }
 
+    /// Degree plans are the plans. Schedules are listed beside them and are not writable.
+    /// A missing or zero revision is reported as 1.
+    @Test func listPlansExposesDegreePlansAndNormalizesRevision() throws {
+        var stored = UserData()
+        var schedule = SchedulePlan(name: "Plan A", termCode: "202730")
+        schedule.revision = 0
+        stored.plans = [schedule]
+        var truth = DegreePlan(name: "True Plan")
+        truth.revision = nil
+        truth.terms = [DegreePlanTerm(season: .spring, year: 2027, courses: [
+            DegreePlanCourse(key: CourseKey(subject: "CS", number: "3000"), title: "Algorithms", credits: 4),
+        ])]
+        var summer = DegreePlan(name: "Summer Internship")
+        summer.revision = 0
+        summer.terms = [DegreePlanTerm(season: .summerFull, year: 2027)]
+        stored.degreePlans = [truth, summer]
+        try UserDataFile.write(stored, to: plansURL)
+
+        let listed = try call("list_plans", [:])
+        let plans = listed["plans"] as? [[String: Any]] ?? []
+        let schedules = listed["schedules"] as? [[String: Any]] ?? []
+        #expect(plans.compactMap { $0["name"] as? String }.sorted() == ["Summer Internship", "True Plan"])
+        #expect(plans.allSatisfy { $0["revision"] as? Int == 1 && $0["updated_at"] != nil && $0["updated"] == nil })
+        let truthRow = try #require(plans.first { $0["name"] as? String == "True Plan" })
+        let truthTerms = truthRow["terms"] as? [[String: Any]]
+        #expect(truthTerms?.first?["term"] as? String == "202730")
+        #expect(truthTerms?.first?["name"] as? String == "Spring 2027")
+        let summerRow = try #require(plans.first { $0["name"] as? String == "Summer Internship" })
+        let summerTerms = summerRow["terms"] as? [[String: Any]]
+        #expect(summerTerms?.first?["term"] as? String == "202750")
+        #expect(summerTerms?.first?["name"] as? String == "Summer Full 2027")
+        #expect(schedules.compactMap { $0["name"] as? String } == ["Plan A"])
+        #expect(schedules.first?["revision"] as? Int == 1)
+        let scheduleTerms = schedules.first?["terms"] as? [[String: Any]]
+        #expect(scheduleTerms?.first?["term"] as? String == "202730")
+        #expect(scheduleTerms?.first?["name"] as? String == "Spring 2027")
+
+        let scheduleID = try #require(schedules.first?["id"] as? String)
+        let refused = server.call(name: "get_plan", arguments: ["plan_id": scheduleID])
+        #expect(refused["isError"] as? Bool == true)
+
+        let id = try #require(truthRow["id"] as? String)
+        let added = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3500", "expected_revision": 1,
+        ])
+        #expect(added["revision"] as? Int == 2)
+        let numbers = courses(in: added, term: "202730").compactMap { $0["number"] as? String }.sorted()
+        #expect(numbers == ["3000", "3500"])
+        let reloaded = try UserDataFile.read(from: plansURL)
+        #expect(reloaded.plans.map(\.name) == ["Plan A"])
+        #expect(reloaded.degreePlans.first { $0.name == "True Plan" }?.revision == 2)
+    }
+
     @Test func revisionConflictLeavesTheFileAlone() throws {
         let id = try planID(try call("create_plan", ["name": "Spring", "terms": ["202730"]]))
         _ = try call("rename_plan", ["plan_id": id, "name": "First", "expected_revision": 1])
@@ -497,9 +557,9 @@ struct MCPToolTests {
         #expect(FileManager.default.fileExists(atPath: backup.path))
         // `UserDataStore` loads the file with `UserDataFile.read`.
         let stored = try UserDataFile.read(from: plansURL)
-        let plan = try #require(stored.plans.first { $0.name == "Renamed" })
-        #expect(plan.courses.map(\.key) == [CourseKey(subject: "CS", number: "3000")])
-        #expect(plan.termCode == "202730")
+        let plan = try #require(stored.degreePlans.first { $0.name == "Renamed" })
+        #expect(plan.terms.flatMap(\.courses).map(\.key) == [CourseKey(subject: "CS", number: "3000")])
+        #expect(plan.terms.map { bannerCode($0) } == ["202730"])
         #expect(plan.revision == 3)
     }
 
@@ -684,8 +744,10 @@ struct MCPHelperSafetyTests {
         #expect(result["isError"] as? Bool != true)
         let payload = result["structuredContent"] as? [String: Any]
         let listed = payload?["plans"] as? [[String: Any]] ?? []
-        #expect(listed.count == 1)
-        #expect(listed.first?["name"] as? String == "FromGroup")
+        let schedules = payload?["schedules"] as? [[String: Any]] ?? []
+        #expect(listed.isEmpty)
+        #expect(schedules.count == 1)
+        #expect(schedules.first?["name"] as? String == "FromGroup")
         chmod(legacy.path, 0o644)
         #expect(try Data(contentsOf: legacy) == legacyBytes)
         #expect(!FileManager.default.fileExists(atPath: legacy.path + ".premigration.bak"))

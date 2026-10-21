@@ -120,21 +120,28 @@ MCP write is not dropped. The stored name keeps " (edited in app)". The Mac side
 and schedule lists show an "App edit" badge and drop that suffix from the visible
 label, then middle-truncate what remains.
 
-### How an MCP plan maps onto schedules
+### Degree plans are the plans
 
-The GUI stores one term per `SchedulePlan`. An MCP plan can span both bundled terms.
-Those schedules share an optional `folderID`. The plan id is that UUID. A schedule
-the app created with no `folderID` shows up as its own one-term plan, and the plan
-id is that schedule's id. The app still lists each term as its own schedule. Both
-`folderID` and `revision` are optional, so a `UserData.json` written by an older
-build still decodes. A missing revision counts as `0`. A `version` above `1` is an
-unknown newer file: every plan tool returns `storage_error` and nothing is written.
+`list_plans`, `get_plan`, and every write tool use `degreePlans` in `UserData.json`
+("True Plan", "Summer Internship"). A semester is a Banner code plus the name the
+degree plan already shows, for example `{"term":"202730","name":"Spring 2027"}`.
+Fall of calendar year Y is `(Y+1)10`, Spring is `Y30`, Summer Session A is `Y40`,
+Summer Full is `Y50`, Summer Session B is `Y60`, and Winter is `Y20`.
+
+Schedules ("Plan A") stay in the file. `list_plans` returns them under `schedules`,
+with the same term, `updated_at`, and revision fields. `get_plan` and the write
+tools do not accept a schedule id. A schedule the app saved with no `folderID` is
+one entry. Schedules that share a `folderID` are one entry, and the id is that
+folder. Both `folderID` and a schedule's `revision` are optional, so an older
+`UserData.json` still decodes. A missing schedule revision and a stored `0` both
+count as `1` in that list. A `version` above `1` is an unknown newer file: every
+plan tool returns `storage_error` and nothing is written.
 
 Every write except `create_plan` requires `expected_revision`. The saved revision is
-the highest `revision` among the plan's schedules. If it does not match, the tool
-returns `revision_conflict` and does not write. A successful write sets every
-schedule in the plan to `expected_revision + 1`. New plans start at revision `1`.
-The app's own save paths bump `revision` the same way.
+the degree plan's `revision`. A missing revision and a stored `0` both count as
+`1`. If it does not match, the tool returns `revision_conflict` and does not write.
+A successful write sets that degree plan's `revision` to `expected_revision + 1`.
+New plans start at revision `1`.
 
 A course is accepted when it exists in either bundled catalog, so a course that is
 not taught in the target term can still be saved (that is what reorganize moves).
@@ -296,21 +303,38 @@ Their prerequisites are not in the plan, so order is kept. `unresolved` is empty
 
 ## Plan tools
 
-`updated` is an ISO-8601 timestamp. `revision` is an integer.
+`updated_at` is an ISO-8601 timestamp. `revision` is an integer starting at 1.
+A missing revision and a stored 0 are both reported as 1.
 
 ### `list_plans`
 
-No arguments. Read-only. A missing file returns `{ "plans": [] }`. A file that
-exists but cannot be read returns `storage_error`.
+No arguments. Read-only. A missing file returns `{ "plans": [], "schedules": [] }`.
+A file that exists but cannot be read returns `storage_error`. `plans` are degree
+plans. `schedules` are the app's term schedules and are not writable through these
+tools.
 
 ```json
 {
   "plans": [
     {
       "id": "6F9619FF-8B86-D011-B42D-00CF4FC964FF",
-      "name": "Spring",
-      "terms": ["202710", "202730"],
-      "updated": "2026-10-20T19:00:00Z",
+      "name": "True Plan",
+      "terms": [
+        { "term": "202710", "name": "Fall 2026" },
+        { "term": "202730", "name": "Spring 2027" }
+      ],
+      "updated_at": "2026-10-20T19:00:00Z",
+      "revision": 1
+    }
+  ],
+  "schedules": [
+    {
+      "id": "7C9E6679-7425-40DE-944B-E07FC1F90AE7",
+      "name": "Plan A",
+      "terms": [
+        { "term": "202730", "name": "Spring 2027" }
+      ],
+      "updated_at": "2026-10-20T19:00:00Z",
       "revision": 1
     }
   ]
@@ -326,10 +350,11 @@ Required: `plan_id` (UUID). Read-only.
   "id": "6F9619FF-8B86-D011-B42D-00CF4FC964FF",
   "name": "Spring",
   "revision": 1,
-  "updated": "2026-10-20T19:00:00Z",
+  "updated_at": "2026-10-20T19:00:00Z",
   "terms": [
     {
       "term": "202730",
+      "name": "Spring 2027",
       "courses": [
         {
           "subject": "CS",
@@ -392,10 +417,10 @@ term is kept so the plan id still resolves.
 ### `move_course`
 
 Required: `plan_id`, `subject`, `number`, `from_term`, `to_term`, `expected_revision`.
-The course must already be in `from_term`. A chosen CRN is kept only when that same
-CRN is a section of the course in `to_term`. This tool still moves every row of
-that subject and number together. When more than one CRN is stored, the last one
-that is also offered in `to_term` is the one it keeps.
+The course must already be in `from_term`. Every row of that subject and number
+moves. A chosen CRN stays on its row only when that same CRN is a section of the
+course in `to_term`. A row whose CRN is not offered there moves without a CRN, and
+a missing CRN does not create a second row when `to_term` already has that number.
 
 ### `set_section`
 

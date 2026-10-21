@@ -11,13 +11,13 @@ import Foundation
 
 extension MCPTool {
     static let planTools: [MCPTool] = [
-        MCPTool(name: "list_plans", description: "List saved schedule plans: id, name, terms, updated time, and revision.", properties: [:], required: [], readOnly: true) { _, server in
+        MCPTool(name: "list_plans", description: "List saved degree plans: id, name, terms as {term, name} objects, updated_at, and revision. Schedules are returned separately and are not what the write tools edit.", properties: [:], required: [], readOnly: true) { _, server in
             try server.listPlans()
         },
-        MCPTool(name: "get_plan", description: "One saved plan, with terms, courses, chosen sections, clashes, and courses the bundled catalog does not offer in that term.", properties: ["plan_id": stringSchema], required: ["plan_id"], readOnly: true) { arguments, server in
+        MCPTool(name: "get_plan", description: "One saved degree plan, with terms, courses, chosen sections, clashes, and courses the bundled catalog does not offer in that term.", properties: ["plan_id": stringSchema], required: ["plan_id"], readOnly: true) { arguments, server in
             try server.getPlan(id: try planID(arguments))
         },
-        MCPTool(name: "create_plan", description: "Create a saved plan in the app's UserData.json. terms is an optional list of term strings such as 202730. Courses are added with add_course.", properties: [
+        MCPTool(name: "create_plan", description: "Create a saved degree plan in the app's UserData.json. terms is an optional list of term strings such as 202730. Courses are added with add_course.", properties: [
             "name": stringSchema,
             "terms": ["type": "array", "items": stringSchema],
         ], required: ["name"], readOnly: false) { arguments, server in
@@ -67,16 +67,17 @@ extension MCPTool {
 extension TermOrganizeMCPServer {
     func listPlans() throws -> [String: Any] {
         let data = try storedPlans()
-        let groups = PlanGroup.groups(in: data.plans)
-        return ["plans": groups.map { $0.summary() }]
+        let plans = data.degreePlans.sorted { $0.updatedAt > $1.updatedAt }.map { degreeSummary($0) }
+        let schedules = PlanGroup.groups(in: data.plans).map { $0.summary() }
+        return ["plans": plans, "schedules": schedules]
     }
 
     func getPlan(id: UUID) throws -> [String: Any] {
         let data = try storedPlans()
-        guard let group = PlanGroup.groups(in: data.plans).first(where: { $0.id == id }) else {
-            throw MCPToolError(code: "unknown_plan", message: "No saved plan \(id.uuidString).")
+        guard let plan = data.degreePlans.first(where: { $0.id == id }) else {
+            throw MCPToolError(code: "unknown_plan", message: "No saved degree plan \(id.uuidString).")
         }
-        return try planPayload(group)
+        return planPayload(plan)
     }
 
     /// A missing file is an empty document. A file that exists but cannot be read
@@ -99,21 +100,26 @@ extension TermOrganizeMCPServer {
         let name = stringArg(arguments, "name") ?? ""
         guard !name.isEmpty else { throw MCPToolError(code: "bad_name", message: "name is required.") }
         let requested = try termStringList(arguments["terms"])
-        let folder = UUID()
-        var created: PlanGroup?
+        var created: DegreePlan?
         try modifyPlans { data in
             let codes = requested.isEmpty
                 ? [CatalogLibrary.allowedTermCodes.first { library.index(for: $0) != nil } ?? "202730"]
                 : requested
-            var plans: [SchedulePlan] = []
+            var plan = DegreePlan(name: name)
+            plan.revision = 1
+            plan.isPrimary = data.degreePlans.isEmpty
             for code in codes {
                 try validateTerm(code)
-                plans.append(newSchedule(name: name, term: code, folder: folder, courses: [], data: data))
+                guard let term = degreeTerm(for: code) else {
+                    throw MCPToolError(code: "unknown_term", message: "Term \(code) is not a bundled catalog. Use 202710 or 202730.")
+                }
+                plan.terms.append(term)
             }
-            data.plans.append(contentsOf: plans)
-            created = PlanGroup(id: folder, plans: plans)
+            plan.sortTerms()
+            data.degreePlans.append(plan)
+            created = plan
         }
-        return try planPayload(created!)
+        return planPayload(created!)
     }
 
     func renamePlan(_ arguments: [String: Any]) throws -> [String: Any] {
@@ -121,8 +127,8 @@ extension TermOrganizeMCPServer {
         let name = stringArg(arguments, "name") ?? ""
         guard !name.isEmpty else { throw MCPToolError(code: "bad_name", message: "name is required.") }
         let expected = try expectedRevision(arguments)
-        return try mutate(id: id, expected: expected) { group in
-            for index in group.plans.indices { group.plans[index].name = name }
+        return try mutate(id: id, expected: expected) { plan in
+            plan.name = name
         }
     }
 
@@ -133,14 +139,16 @@ extension TermOrganizeMCPServer {
         let crn = stringArg(arguments, "crn")
         try validateCourse(key, term: term, crn: crn)
         let expected = try expectedRevision(arguments)
-        let courseCRNs = Set((library.index(for: term)?.sections(for: key) ?? []).map(\.crn))
-        return try mutate(id: id, expected: expected) { group in
-            if let index = group.plans.firstIndex(where: { $0.termCode == term }) {
-                group.plans[index].include(key: key, crn: crn, courseCRNs: courseCRNs)
+        return try mutate(id: id, expected: expected) { plan in
+            let course = catalogCourse(key, crn: crn)
+            if let index = plan.terms.firstIndex(where: { bannerCode($0) == term }) {
+                plan.terms[index].include(course: course)
             } else {
-                var plan = newSchedule(name: group.plans.first?.name ?? "Plan", term: term, folder: group.id, courses: [], data: UserData())
-                plan.include(key: key, crn: crn, courseCRNs: courseCRNs)
-                group.plans.append(plan)
+                guard var created = degreeTerm(for: term) else {
+                    throw MCPToolError(code: "unknown_term", message: "Term \(term) is not a bundled catalog. Use 202710 or 202730.")
+                }
+                created.include(course: course)
+                plan.terms.append(created)
             }
         }
     }
@@ -150,15 +158,13 @@ extension TermOrganizeMCPServer {
         let term = try termCode(arguments, key: "term")
         let key = try courseKey(arguments)
         let expected = try expectedRevision(arguments)
-        return try mutate(id: id, expected: expected) { group in
-            guard let index = group.plans.firstIndex(where: { $0.termCode == term }) else {
+        return try mutate(id: id, expected: expected) { plan in
+            guard let index = plan.terms.firstIndex(where: { bannerCode($0) == term && $0.courses.contains { $0.key == key } }) else {
                 throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(term) of this plan.")
             }
-            let crns = Set((library.index(for: term)?.sections(for: key) ?? []).map(\.crn))
-            group.plans[index].courses.removeAll { $0.key == key }
-            group.plans[index].selectedCRNs.removeAll { crns.contains($0) }
-            if !group.plans[index].contains(key) && group.plans[index].courses.isEmpty && group.plans.count > 1 {
-                group.plans.remove(at: index)
+            plan.terms[index].courses.removeAll { $0.key == key }
+            if plan.terms[index].courses.isEmpty && plan.terms.count > 1 {
+                plan.terms.remove(at: index)
             }
         }
     }
@@ -170,29 +176,34 @@ extension TermOrganizeMCPServer {
         let to = try termCode(arguments, key: "to_term")
         try validateCourse(key, term: to, crn: nil)
         let expected = try expectedRevision(arguments)
-        return try mutate(id: id, expected: expected) { group in
-            guard let source = group.plans.firstIndex(where: { $0.termCode == from && $0.contains(key) }) else {
+        return try mutate(id: id, expected: expected) { plan in
+            guard let source = plan.terms.firstIndex(where: { bannerCode($0) == from && $0.courses.contains { $0.key == key } }) else {
                 throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(from) of this plan.")
             }
-            let color = group.plans[source].course(key)?.colorIndex ?? 0
-            let sourceCRNs = Set((library.index(for: from)?.sections(for: key) ?? []).map(\.crn))
-            let kept = group.plans[source].selectedCRNs.filter { sourceCRNs.contains($0) }
-            group.plans[source].courses.removeAll { $0.key == key }
-            group.plans[source].selectedCRNs.removeAll { sourceCRNs.contains($0) }
-            if group.plans[source].courses.isEmpty && from != to {
-                group.plans.remove(at: source)
+            let moving = plan.terms[source].courses.filter { $0.key == key }
+            plan.terms[source].courses.removeAll { $0.key == key }
+            if plan.terms[source].courses.isEmpty && from != to {
+                plan.terms.remove(at: source)
             }
-            if let destination = group.plans.firstIndex(where: { $0.termCode == to }) {
-                if !group.plans[destination].contains(key) {
-                    group.plans[destination].courses.append(PlanCourse(key: key, colorIndex: color))
+            if let destination = plan.terms.firstIndex(where: { bannerCode($0) == to }) {
+                for course in moving {
+                    let kept = course.crn.flatMap { crn in
+                        library.index(for: to)?.section(crn: crn)?.courseKey == key ? crn : nil
+                    }
+                    var row = course
+                    row.crn = kept
+                    plan.terms[destination].include(course: row)
                 }
-                for crn in kept where library.index(for: to)?.section(crn: crn)?.courseKey == key {
-                    try select(crn, for: key, in: &group.plans[destination], term: to)
+            } else if var created = degreeTerm(for: to) {
+                for course in moving {
+                    let kept = course.crn.flatMap { crn in
+                        library.index(for: to)?.section(crn: crn)?.courseKey == key ? crn : nil
+                    }
+                    var row = course
+                    row.crn = kept
+                    created.include(course: row)
                 }
-            } else {
-                var plan = newSchedule(name: group.plans.first?.name ?? "Plan", term: to, folder: group.id, courses: [key], data: UserData())
-                plan.courses[0].colorIndex = color
-                group.plans.append(plan)
+                plan.terms.append(created)
             }
         }
     }
@@ -205,11 +216,11 @@ extension TermOrganizeMCPServer {
         let fromCRN = stringArg(arguments, "from_crn")
         try validateCourse(key, term: term, crn: crn)
         let expected = try expectedRevision(arguments)
-        return try mutate(id: id, expected: expected) { group in
-            guard let index = group.plans.firstIndex(where: { $0.termCode == term && $0.contains(key) }) else {
+        return try mutate(id: id, expected: expected) { plan in
+            guard let index = plan.terms.firstIndex(where: { bannerCode($0) == term && $0.courses.contains { $0.key == key } }) else {
                 throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(term) of this plan.")
             }
-            try assignSection(crn, from: fromCRN, for: key, in: &group.plans[index], term: term)
+            try assignSection(crn, from: fromCRN, for: key, in: &plan.terms[index])
         }
     }
 
@@ -217,63 +228,46 @@ extension TermOrganizeMCPServer {
         let id = try planID(arguments)
         let expected = try expectedRevision(arguments)
         let before = try getPlan(id: id)
-        let input = try planTerms(before["terms"], library: library)
+        let rows = before["terms"] as? [[String: Any]] ?? []
+        let bundled = rows.filter { CatalogLibrary.allowedTermCodes.contains(stringArg($0, "term") ?? "") }
+        let input = try planTerms(bundled, library: library)
         let reorganized = reorganize(input, library: library)
         let moves = reorganized["moves"] as? [[String: Any]] ?? []
         let unresolved = reorganized["unresolved"] as? [[String: Any]] ?? []
         let planObject = reorganized["plan"] as? [String: Any] ?? [:]
-        let result = try mutate(id: id, expected: expected) { group in
-            let name = group.plans.first?.name ?? "Plan"
-            var rebuilt: [SchedulePlan] = []
+        let result = try mutate(id: id, expected: expected) { plan in
+            var rebuilt: [DegreePlanTerm] = []
             for row in planObject["terms"] as? [[String: Any]] ?? [] {
                 let code = stringArg(row, "term") ?? ""
                 let entries = courseEntries(row["courses"])
-                var plan = group.plans.first { $0.termCode == code } ?? newSchedule(name: name, term: code, folder: group.id, courses: [], data: UserData())
-                plan.name = name
-                plan.folderID = group.id
-                // One output row is one plan row. Two different CRNs of the same
-                // number stay two rows. Copy the stored row when it already has
-                // that pin, so color and exclusions survive. Do not call select.
+                var term = plan.terms.first { bannerCode($0) == code } ?? degreeTerm(for: code) ?? DegreePlanTerm(season: .spring, year: 2027)
+                let existing = term.courses
                 var used = Set<Int>()
-                var courses: [PlanCourse] = []
+                var courses: [DegreePlanCourse] = []
                 for entry in entries {
-                    let match = plan.courses.indices.first { index in
-                        guard !used.contains(index), plan.courses[index].key == entry.key else { return false }
-                        if let crn = entry.crn {
-                            if plan.courses[index].pinnedCRN == crn { return true }
-                            // A plan saved before pinnedCRN stored the choice only in selectedCRNs.
-                            let claimed = Set(plan.courses.compactMap(\.pinnedCRN))
-                            return plan.courses[index].pinnedCRN == nil && plan.selectedCRNs.contains(crn) && !claimed.contains(crn)
-                        }
-                        return plan.courses[index].pinnedCRN?.isEmpty != false
+                    let match = existing.indices.first { index in
+                        guard !used.contains(index), existing[index].key == entry.key else { return false }
+                        if let crn = entry.crn { return existing[index].crn == crn }
+                        return existing[index].crn?.isEmpty != false
                     }
-                    var course: PlanCourse
+                    var course: DegreePlanCourse
                     if let match {
                         used.insert(match)
-                        course = plan.courses[match]
+                        course = existing[match]
                     } else {
-                        course = PlanCourse(key: entry.key, colorIndex: courses.count % CourseColorPalette.count)
+                        course = catalogCourse(entry.key, crn: entry.crn)
                     }
-                    if let crn = entry.crn { course.pinnedCRN = crn }
+                    course.crn = entry.crn
                     courses.append(course)
                 }
-                plan.courses = courses
-                // Keep a chosen CRN only when that section is still one of the courses
-                // in this term. Look the section up by CRN. Do not substitute another
-                // section of the same subject and number.
-                let remaining = Set(entries.map(\.key))
-                plan.selectedCRNs = plan.selectedCRNs.filter { crn in
-                    guard let section = library.index(for: code)?.section(crn: crn) else { return false }
-                    return remaining.contains(section.courseKey)
-                }
-                for entry in entries {
-                    if let crn = entry.crn, !plan.selectedCRNs.contains(crn) {
-                        plan.selectedCRNs.append(crn)
-                    }
-                }
-                rebuilt.append(plan)
+                term.courses = courses
+                rebuilt.append(term)
             }
-            group.plans = rebuilt.isEmpty ? group.plans : rebuilt
+            // Semesters outside the bundled catalogs stay where the degree plan put them.
+            for term in plan.terms where !CatalogLibrary.allowedTermCodes.contains(bannerCode(term)) {
+                rebuilt.append(term)
+            }
+            if !rebuilt.isEmpty { plan.terms = rebuilt }
         }
         var payload = result
         payload["moves"] = moves
@@ -289,13 +283,18 @@ extension TermOrganizeMCPServer {
         let expected = try expectedRevision(arguments)
         var removed = false
         try modifyPlans { data in
-            let groups = PlanGroup.groups(in: data.plans)
-            guard let group = groups.first(where: { $0.id == id }) else {
-                throw MCPToolError(code: "unknown_plan", message: "No saved plan \(id.uuidString).")
+            guard let index = data.degreePlans.firstIndex(where: { $0.id == id }) else {
+                throw MCPToolError(code: "unknown_plan", message: "No saved degree plan \(id.uuidString).")
             }
-            try group.requireRevision(expected)
-            let ids = Set(group.plans.map(\.id))
-            data.plans.removeAll { ids.contains($0.id) }
+            let current = displayedRevision(data.degreePlans[index].revision)
+            guard current == expected else {
+                throw MCPToolError(
+                    code: "revision_conflict",
+                    message: "The plan changed. expected_revision was \(expected) and the saved revision is \(current).",
+                    extra: ["revision": current]
+                )
+            }
+            data.degreePlans.remove(at: index)
             removed = true
         }
         return ["deleted": removed, "plan_id": id.uuidString]
@@ -315,64 +314,54 @@ extension TermOrganizeMCPServer {
         try UserDataFile.modify(at: plansURL, change)
     }
 
-    private func mutate(id: UUID, expected: Int, _ change: (inout PlanGroup) throws -> Void) throws -> [String: Any] {
-        var updated: PlanGroup?
+    private func mutate(id: UUID, expected: Int, _ change: (inout DegreePlan) throws -> Void) throws -> [String: Any] {
+        var updated: DegreePlan?
         try modifyPlans { data in
-            var groups = PlanGroup.groups(in: data.plans)
-            guard let index = groups.firstIndex(where: { $0.id == id }) else {
-                throw MCPToolError(code: "unknown_plan", message: "No saved plan \(id.uuidString).")
+            guard let index = data.degreePlans.firstIndex(where: { $0.id == id }) else {
+                throw MCPToolError(code: "unknown_plan", message: "No saved degree plan \(id.uuidString).")
             }
-            try groups[index].requireRevision(expected)
-            try change(&groups[index])
-            let next = expected + 1
-            let now = Date()
-            for planIndex in groups[index].plans.indices {
-                groups[index].plans[planIndex].revision = next
-                groups[index].plans[planIndex].updatedAt = now
-                groups[index].plans[planIndex].folderID = groups[index].id
+            let current = displayedRevision(data.degreePlans[index].revision)
+            guard current == expected else {
+                throw MCPToolError(
+                    code: "revision_conflict",
+                    message: "The plan changed. expected_revision was \(expected) and the saved revision is \(current).",
+                    extra: ["revision": current]
+                )
             }
-            let ids = Set(groups[index].plans.map(\.id))
-            data.plans.removeAll { plan in
-                plan.folderID == id || ids.contains(plan.id)
-            }
-            // Also drop schedules that were in the group but removed by the edit.
-            let previous = PlanGroup.groups(in: data.plans + groups[index].plans)
-            _ = previous
-            data.plans.removeAll { $0.folderID == id }
-            data.plans.append(contentsOf: groups[index].plans)
-            updated = groups[index]
+            try change(&data.degreePlans[index])
+            data.degreePlans[index].revision = expected + 1
+            data.degreePlans[index].updatedAt = Date()
+            data.degreePlans[index].sortTerms()
+            updated = data.degreePlans[index]
         }
-        return try planPayload(updated!)
+        return planPayload(updated!)
     }
 
-    private func planPayload(_ group: PlanGroup) throws -> [String: Any] {
+    private func planPayload(_ plan: DegreePlan) -> [String: Any] {
         var terms: [[String: Any]] = []
         var clashes: [[String: Any]] = []
         var notOffered: [[String: Any]] = []
-        for plan in group.plans.sorted(by: { $0.termCode < $1.termCode }) {
-            let index = library.index(for: plan.termCode)
+        for term in plan.terms.sorted(by: { $0.sortKey < $1.sortKey }) {
+            let code = bannerCode(term)
+            let index = library.index(for: code)
             var courses: [[String: Any]] = []
             var chosen: [CourseSection] = []
-            for course in plan.courses {
-                var row: [String: Any] = ["subject": course.key.subject, "number": course.key.number]
-                let sections = index?.sections(for: course.key) ?? []
-                if sections.isEmpty {
-                    notOffered.append(["term": plan.termCode, "subject": course.key.subject, "number": course.key.number])
+            for course in term.courses {
+                guard let key = course.key else {
+                    courses.append(["label": course.label, "title": course.title, "credits": course.credits])
+                    continue
                 }
-                // Each row reports its own pin. The first selected section of
-                // the number is only a fallback for a single unpinned row.
-                let siblingPins = Set(plan.courses.compactMap { other -> String? in
-                    guard other.key == course.key, let pin = other.pinnedCRN, !pin.isEmpty, pin != course.pinnedCRN else { return nil }
-                    return pin
-                })
+                var row: [String: Any] = ["subject": key.subject, "number": key.number, "title": course.title, "credits": course.credits]
+                let sections = index?.sections(for: key) ?? []
+                if sections.isEmpty {
+                    notOffered.append(["term": code, "subject": key.subject, "number": key.number])
+                }
                 let own: [CourseSection]
-                if let pin = course.pinnedCRN, !pin.isEmpty {
+                if let pin = course.crn, !pin.isEmpty {
                     row["crn"] = pin
                     own = sections.filter { $0.crn == pin }
                 } else {
-                    let selected = sections.filter { plan.selectedCRNs.contains($0.crn) && !siblingPins.contains($0.crn) }
-                    if let crn = selected.first?.crn { row["crn"] = crn }
-                    own = selected
+                    own = []
                 }
                 row["sections"] = own.map { sectionJSON($0) }
                 chosen.append(contentsOf: own)
@@ -380,31 +369,32 @@ extension TermOrganizeMCPServer {
             }
             for left in 0..<chosen.count {
                 for right in (left + 1)..<chosen.count where chosen[left].conflicts(with: chosen[right]) {
-                    clashes.append(["term": plan.termCode, "crn": chosen[left].crn, "other": chosen[right].crn, "reason": "Overlapping meeting"])
+                    clashes.append(["term": code, "crn": chosen[left].crn, "other": chosen[right].crn, "reason": "Overlapping meeting"])
                 }
             }
-            terms.append(["term": plan.termCode, "courses": courses])
+            var termRow = termObject(code: code, name: term.name)
+            termRow["courses"] = courses
+            terms.append(termRow)
         }
-        return [
-            "id": group.id.uuidString,
-            "name": group.plans.first?.name ?? "",
-            "revision": group.revision,
-            "updated": iso8601(group.updated),
-            "terms": terms,
-            "validation": ["clashes": clashes, "not_offered": notOffered],
+        var payload = degreeSummary(plan)
+        payload["terms"] = terms
+        payload["validation"] = ["clashes": clashes, "not_offered": notOffered]
+        return payload
+    }
+
+    private func degreeSummary(_ plan: DegreePlan) -> [String: Any] {
+        [
+            "id": plan.id.uuidString,
+            "name": plan.name,
+            "terms": plan.terms.sorted { $0.sortKey < $1.sortKey }.map { termObject(code: bannerCode($0), name: $0.name) },
+            "updated_at": iso8601(plan.updatedAt),
+            "revision": displayedRevision(plan.revision),
         ]
     }
 
-    private func newSchedule(name: String, term: String, folder: UUID, courses: [CourseKey], data: UserData) -> SchedulePlan {
-        var plan = SchedulePlan(name: name, termCode: term)
-        plan.folderID = folder
-        plan.revision = 1
-        plan.isPrimary = !data.plans.contains { $0.termCode == term && $0.isPrimary }
-        plan.courses = courses.map { PlanCourse(key: $0, colorIndex: 0) }
-        for (index, _) in plan.courses.enumerated() {
-            plan.courses[index].colorIndex = index % CourseColorPalette.count
-        }
-        return plan
+    private func catalogCourse(_ key: CourseKey, crn: String?) -> DegreePlanCourse {
+        let listed = library.indexes.values.compactMap { $0.course(key) }.first
+        return DegreePlanCourse(key: key, title: listed?.title ?? key.description, credits: listed?.maxCredits ?? 0, crn: crn)
     }
 
     private func validateTerm(_ code: String) throws {
@@ -435,26 +425,16 @@ extension TermOrganizeMCPServer {
         }
     }
 
-    /// `move_course` still moves every row of a subject and number together.
-    /// The last CRN that is also offered in the destination is the one it keeps.
-    private func select(_ crn: String, for key: CourseKey, in plan: inout SchedulePlan, term: String) throws {
-        guard let index = library.index(for: term) else { return }
-        let courseCRNs = Set(index.sections(for: key).map(\.crn))
-        plan.selectedCRNs.removeAll { courseCRNs.contains($0) }
-        plan.selectedCRNs.append(crn)
-    }
-
-    /// Replaces the pin on one row. Other rows of the same number keep theirs.
-    /// `from` is required when more than one row of `key` is already in the plan.
-    private func assignSection(_ crn: String, from: String?, for key: CourseKey, in plan: inout SchedulePlan, term: String) throws {
-        let courseCRNs = Set((library.index(for: term)?.sections(for: key) ?? []).map(\.crn))
-        let matches = plan.courses.indices.filter { plan.courses[$0].key == key }
+    /// Replaces the CRN on one row. Other rows of the same number keep theirs.
+    /// `from` is required when more than one row of `key` is already in the term.
+    private func assignSection(_ crn: String, from: String?, for key: CourseKey, in term: inout DegreePlanTerm) throws {
+        let matches = term.courses.indices.filter { term.courses[$0].key == key }
         guard !matches.isEmpty else {
-            throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(term) of this plan.")
+            throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in this term of the plan.")
         }
         let target: Int
         if let from {
-            guard let index = matches.first(where: { rowMatches($0, crn: from, in: plan) }) else {
+            guard let index = matches.first(where: { term.courses[$0].crn == from }) else {
                 throw MCPToolError(code: "unknown_crn", message: "CRN \(from) is not a chosen section of \(key.description) in this term.")
             }
             target = index
@@ -463,25 +443,11 @@ extension TermOrganizeMCPServer {
         } else {
             throw MCPToolError(code: "invalid_argument", message: "\(key.description) is in this term more than once. Pass from_crn to name the section to replace.")
         }
-        if plan.courses.contains(where: { $0.pinnedCRN == crn && plan.courses[target].pinnedCRN != crn }) {
+        if term.courses.contains(where: { $0.crn == crn && term.courses[target].crn != crn }) {
             throw MCPToolError(code: "invalid_argument", message: "CRN \(crn) is already chosen for another \(key.description) in this term.")
         }
-        let previous = plan.courses[target].pinnedCRN
-        if previous == crn { return }
-        plan.courses[target].pinnedCRN = crn
-        let reserved = Set(plan.courses.compactMap { pin in pin.pinnedCRN }.filter { !$0.isEmpty })
-        plan.selectedCRNs.removeAll { candidate in
-            guard courseCRNs.contains(candidate), candidate != crn, !reserved.contains(candidate) else { return false }
-            if candidate == previous { return true }
-            return previous == nil
-        }
-        if !plan.selectedCRNs.contains(crn) { plan.selectedCRNs.append(crn) }
-    }
-
-    private func rowMatches(_ index: Int, crn: String, in plan: SchedulePlan) -> Bool {
-        if plan.courses[index].pinnedCRN == crn { return true }
-        let claimed = Set(plan.courses.compactMap(\.pinnedCRN))
-        return plan.courses[index].pinnedCRN == nil && plan.selectedCRNs.contains(crn) && !claimed.contains(crn)
+        if term.courses[target].crn == crn { return }
+        term.courses[target].crn = crn
     }
 }
 
@@ -489,27 +455,19 @@ struct PlanGroup {
     var id: UUID
     var plans: [SchedulePlan]
 
-    var revision: Int { plans.map { $0.revision ?? 0 }.max() ?? 0 }
+    var revision: Int { plans.map { displayedRevision($0.revision) }.max() ?? 1 }
     var updated: Date { plans.map(\.updatedAt).max() ?? .distantPast }
 
     func summary() -> [String: Any] {
-        [
+        let terms = plans.map { termObject(code: $0.termCode, name: termName(for: $0.termCode)) }
+            .sorted { ($0["term"] as? String ?? "") < ($1["term"] as? String ?? "") }
+        return [
             "id": id.uuidString,
             "name": plans.first?.name ?? "",
-            "terms": plans.map(\.termCode).sorted(),
-            "updated": iso8601(updated),
+            "terms": terms,
+            "updated_at": iso8601(updated),
             "revision": revision,
         ]
-    }
-
-    func requireRevision(_ expected: Int) throws {
-        guard revision == expected else {
-            throw MCPToolError(
-                code: "revision_conflict",
-                message: "The plan changed. expected_revision was \(expected) and the saved revision is \(revision).",
-                extra: ["revision": revision]
-            )
-        }
     }
 
     static func groups(in plans: [SchedulePlan]) -> [PlanGroup] {
@@ -563,6 +521,81 @@ func expectedRevision(_ arguments: [String: Any]) throws -> Int {
         throw MCPToolError(code: "bad_revision", message: "expected_revision is required.")
     }
     return revision
+}
+
+/// A stored revision below 1, including a missing value, is revision 1.
+func displayedRevision(_ stored: Int?) -> Int {
+    let value = stored ?? 0
+    return value < 1 ? 1 : value
+}
+
+/// Banner semester code for a degree-plan semester. Fall of calendar year Y
+/// is `(Y+1)10`. Spring is `Y30`, Summer Session A `Y40`, Summer Full `Y50`,
+/// Summer Session B `Y60`, Winter `Y20`. The college digit is 0.
+func bannerCode(_ term: DegreePlanTerm) -> String {
+    let academic: Int
+    let digit: String
+    switch term.season {
+    case .fall:
+        academic = term.year + 1
+        digit = "1"
+    case .winter:
+        academic = term.year
+        digit = "2"
+    case .spring:
+        academic = term.year
+        digit = "3"
+    case .summerA:
+        academic = term.year
+        digit = "4"
+    case .summerFull:
+        academic = term.year
+        digit = "5"
+    case .summerB:
+        academic = term.year
+        digit = "6"
+    }
+    return String(format: "%04d%@0", academic, digit)
+}
+
+/// The degree-plan semester for a Banner code such as `202730`. Nil when the
+/// season digit is not one this app stores.
+func degreeTerm(for code: String) -> DegreePlanTerm? {
+    guard code.count == 6, let academic = Int(code.prefix(4)) else { return nil }
+    let digit = code[code.index(code.startIndex, offsetBy: 4)]
+    let season: PlanSeason
+    let year: Int
+    switch digit {
+    case "1":
+        season = .fall
+        year = academic - 1
+    case "2":
+        season = .winter
+        year = academic
+    case "3":
+        season = .spring
+        year = academic
+    case "4":
+        season = .summerA
+        year = academic
+    case "5":
+        season = .summerFull
+        year = academic
+    case "6":
+        season = .summerB
+        year = academic
+    default:
+        return nil
+    }
+    return DegreePlanTerm(season: season, year: year)
+}
+
+func termName(for code: String) -> String {
+    degreeTerm(for: code)?.name ?? code
+}
+
+func termObject(code: String, name: String) -> [String: Any] {
+    ["term": code, "name": name]
 }
 
 func iso8601(_ date: Date) -> String {

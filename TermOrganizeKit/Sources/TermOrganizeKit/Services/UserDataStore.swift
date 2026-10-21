@@ -318,6 +318,7 @@ final class UserDataStore {
         if plan.isPrimary {
             for i in degreePlans.indices { degreePlans[i].isPrimary = false }
         }
+        if (plan.revision ?? 0) < 1 { plan.revision = 1 }
         degreePlans.append(plan)
         scheduleSave()
         return plan
@@ -325,9 +326,14 @@ final class UserDataStore {
 
     func updateDegreePlan(id: UUID, _ change: (inout DegreePlan) -> Void) {
         guard let i = degreePlans.firstIndex(where: { $0.id == id }) else { return }
+        let before = degreePlans[i]
         change(&degreePlans[i])
+        guard degreePlans[i] != before else { return }
         degreePlans[i].sortTerms()
         degreePlans[i].updatedAt = .now
+        let stored = before.revision ?? 0
+        let current = stored < 1 ? 1 : stored
+        degreePlans[i].revision = current + 1
         scheduleSave()
     }
 

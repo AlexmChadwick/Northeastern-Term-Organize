@@ -413,9 +413,15 @@ row. The same `crn` twice does not add a row.
 
 ### `remove_course`
 
-Required: `plan_id`, `term`, `subject`, `number`, `expected_revision`. Destructive.
-Also drops CRNs of that course. An emptied extra term is removed. The last remaining
-term is kept so the plan id still resolves.
+Required: `plan_id`, `term`, `subject`, `number`, `expected_revision`. Optional: `crn`.
+Destructive.
+
+This removes one row. When the term has one row of that subject and number, `crn`
+can be omitted and that row is removed. When it has more than one, `crn` names the
+row. Omitting it then is `invalid_argument` and nothing is written. A `crn` that is
+not on a row of that number is `unknown_crn` and nothing is written. The other rows
+stay. An emptied extra term is removed. The last remaining term is kept so the plan
+id still resolves.
 
 ### `move_course`
 

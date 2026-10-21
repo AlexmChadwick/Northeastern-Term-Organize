@@ -34,8 +34,9 @@ extension MCPTool {
         ], required: ["plan_id", "term", "subject", "number", "expected_revision"], readOnly: false) { arguments, server in
             try server.addCourse(arguments)
         },
-        MCPTool(name: "remove_course", description: "Remove a course from a term of a saved plan.", properties: [
-            "plan_id": stringSchema, "term": stringSchema, "subject": stringSchema, "number": stringSchema, "expected_revision": intSchema,
+        MCPTool(name: "remove_course", description: "Remove one row of a course from a term of a saved plan. crn is optional when that subject and number appears once. When it appears more than once, crn names the row to remove. Omitting it then is invalid_argument and nothing is written.", properties: [
+            "plan_id": stringSchema, "term": stringSchema, "subject": stringSchema, "number": stringSchema,
+            "crn": stringSchema, "expected_revision": intSchema,
         ], required: ["plan_id", "term", "subject", "number", "expected_revision"], readOnly: false, destructive: true) { arguments, server in
             try server.removeCourse(arguments)
         },
@@ -157,12 +158,13 @@ extension TermOrganizeMCPServer {
         let id = try planID(arguments)
         let term = try termCode(arguments, key: "term")
         let key = try courseKey(arguments)
+        let crn = stringArg(arguments, "crn")
         let expected = try expectedRevision(arguments)
         return try mutate(id: id, expected: expected) { plan in
             guard let index = plan.terms.firstIndex(where: { bannerCode($0) == term && $0.courses.contains { $0.key == key } }) else {
                 throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(term) of this plan.")
             }
-            plan.terms[index].courses.removeAll { $0.key == key }
+            try removeRow(crn: crn, for: key, in: &plan.terms[index])
             if plan.terms[index].courses.isEmpty && plan.terms.count > 1 {
                 plan.terms.remove(at: index)
             }
@@ -427,6 +429,29 @@ extension TermOrganizeMCPServer {
 
     /// Replaces the CRN on one row. Other rows of the same number keep theirs.
     /// `from` is required when more than one row of `key` is already in the term.
+    /// Removes one row of `key`. A term with one row may omit `crn`. More than one
+    /// row requires `crn`, and a CRN that is not on a row removes nothing.
+    private func removeRow(crn: String?, for key: CourseKey, in term: inout DegreePlanTerm) throws {
+        let matches = term.courses.indices.filter { term.courses[$0].key == key }
+        guard !matches.isEmpty else {
+            throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in this term of the plan.")
+        }
+        if matches.count > 1 {
+            guard let crn else {
+                throw MCPToolError(code: "invalid_argument", message: "\(key.description) is in this term more than once. Pass crn to name the row to remove.")
+            }
+            guard matches.contains(where: { term.courses[$0].crn == crn }) else {
+                throw MCPToolError(code: "unknown_crn", message: "CRN \(crn) is not a chosen section of \(key.description) in this term.")
+            }
+            term.courses.removeAll { $0.key == key && $0.crn == crn }
+            return
+        }
+        if let crn, term.courses[matches[0]].crn != crn {
+            throw MCPToolError(code: "unknown_crn", message: "CRN \(crn) is not a chosen section of \(key.description) in this term.")
+        }
+        term.courses.removeAll { $0.key == key }
+    }
+
     private func assignSection(_ crn: String, from: String?, for key: CourseKey, in term: inout DegreePlanTerm) throws {
         let matches = term.courses.indices.filter { term.courses[$0].key == key }
         guard !matches.isEmpty else {

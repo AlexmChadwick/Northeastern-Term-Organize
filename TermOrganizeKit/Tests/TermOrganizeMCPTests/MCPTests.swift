@@ -330,6 +330,48 @@ struct MCPToolTests {
         #expect(courses.map { $0["number"] as? String } == ["3000"])
     }
 
+    /// Two rows of one number: crn removes one, and omitting it writes nothing.
+    @Test func removeCourseDropsOnePinnedRow() throws {
+        let id = try planID(try call("create_plan", ["name": "Topics", "terms": ["202730"]]))
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "expected_revision": 1,
+        ])
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "11111", "expected_revision": 2,
+        ])
+        let both = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "22222", "expected_revision": 3,
+        ])
+        let topics = courses(in: both, term: "202730").filter { $0["number"] as? String == "4973" }
+        #expect(Set(topics.compactMap { $0["crn"] as? String }) == ["11111", "22222"])
+
+        let ambiguous = server.call(name: "remove_course", arguments: [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "expected_revision": 4,
+        ])
+        #expect(ambiguous["isError"] as? Bool == true)
+        let missingCRN = (ambiguous["structuredContent"] as? [String: Any])?["error"] as? [String: Any]
+        #expect(missingCRN?["code"] as? String == "invalid_argument")
+        let kept = try call("get_plan", ["plan_id": id])
+        #expect(kept["revision"] as? Int == 4)
+        #expect(Set(courses(in: kept, term: "202730").filter { $0["number"] as? String == "4973" }.compactMap { $0["crn"] as? String }) == ["11111", "22222"])
+
+        let wrong = server.call(name: "remove_course", arguments: [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "33333", "expected_revision": 4,
+        ])
+        #expect(wrong["isError"] as? Bool == true)
+        let unknown = (wrong["structuredContent"] as? [String: Any])?["error"] as? [String: Any]
+        #expect(unknown?["code"] as? String == "unknown_crn")
+        let still = try call("get_plan", ["plan_id": id])
+        #expect(still["revision"] as? Int == 4)
+
+        let removed = try call("remove_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "11111", "expected_revision": 4,
+        ])
+        let left = courses(in: removed, term: "202730").filter { $0["number"] as? String == "4973" }
+        #expect(left.count == 1)
+        #expect(left.first?["crn"] as? String == "22222")
+    }
+
     @Test func moveCourse() throws {
         let id = try planID(try call("create_plan", ["name": "Year", "terms": ["202710", "202730"]]))
         _ = try call("add_course", [

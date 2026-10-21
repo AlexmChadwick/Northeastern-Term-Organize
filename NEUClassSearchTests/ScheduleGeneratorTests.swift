@@ -93,4 +93,54 @@ struct ScheduleGeneratorTests {
         #expect(result.totalFound > 0)
         #expect(result.schedules.allSatisfy { $0.crns.count == 3 })
     }
+
+    /// Two special-topics sections share CS 4973. The user pinned one CRN. Generation,
+    /// including a run that would rather use the other section to dodge a conflict or a
+    /// filter, may not substitute it.
+    @Test func pinnedSpecialTopicsSectionIsNeverReplaced() {
+        let pinned = section("11111", "CS", "4973", days: [1, 3], start: 8, end: 9)
+        let other = section("22222", "CS", "4973", days: [1, 3], start: 14, end: 15)
+        let math = section("33333", "MATH", "2331", days: [1, 3], start: 8, end: 9.5)
+        let index = topicsIndex(pinned, other, math)
+        var plan = SchedulePlan(name: "Topics", termCode: "202710")
+        plan.courses = [
+            PlanCourse(key: CourseKey(subject: "CS", number: "4973"), colorIndex: 0),
+            PlanCourse(key: CourseKey(subject: "MATH", number: "2331"), colorIndex: 1),
+        ]
+        plan.selectedCRNs = ["11111"]
+
+        let inputs = ScheduleCourseInput.inputs(for: plan, index: index)
+        #expect(inputs.first { $0.key.number == "4973" }?.sections.map(\.crn) == ["11111"])
+
+        let generated = ScheduleGenerator.generate(courses: inputs, filters: ScheduleFilters())
+        #expect(generated.schedules.allSatisfy { $0.crns.contains("11111") })
+        #expect(!generated.schedules.contains { $0.crns.contains("22222") })
+
+        // 11111 overlaps MATH. 22222 does not. The conflict is not resolved by switching topics.
+        #expect(generated.schedules.isEmpty)
+
+        var filters = ScheduleFilters()
+        filters.earliestStart = 9 * 60
+        let filtered = ScheduleGenerator.generate(courses: inputs, filters: filters)
+        #expect(filtered.schedules.isEmpty)
+        #expect(!filtered.schedules.contains { $0.crns.contains("22222") })
+
+        // With no pin, either topic may be chosen. 22222 is the one that fits with MATH.
+        plan.selectedCRNs = []
+        let open = ScheduleGenerator.generate(courses: ScheduleCourseInput.inputs(for: plan, index: index), filters: ScheduleFilters())
+        #expect(open.schedules.map { Set($0.crns) } == [Set(["22222", "33333"])])
+    }
+
+    private func topicsIndex(_ sections: CourseSection...) -> CatalogIndex {
+        let courses = [
+            Course(subject: "CS", number: "4973", title: "Special Topics", description: "", minCredits: 4, maxCredits: 4,
+                   attributes: [], prereqs: nil, coreqs: nil, postreqs: [], specialTopics: true, college: nil, department: nil, detailsLoaded: true),
+            Course(subject: "MATH", number: "2331", title: "Linear Algebra", description: "", minCredits: 4, maxCredits: 4,
+                   attributes: [], prereqs: nil, coreqs: nil, postreqs: [], specialTopics: false, college: nil, department: nil, detailsLoaded: true),
+        ]
+        return CatalogIndex.build(TermCatalog(
+            term: Term(code: "202710", bannerDescription: "Fall 2026 Semester"),
+            courses: courses, sections: sections, subjects: [], attributes: [], campuses: []
+        ))
+    }
 }

@@ -41,6 +41,15 @@ private enum Support {
         )
     }
 
+    static func banner(_ crn: String, _ subject: String, _ number: String, title: String) -> BannerSection {
+        let json = """
+        {"courseReferenceNumber":"\(crn)","courseNumber":"\(number)","subject":"\(subject)",\
+        "sequenceNumber":"01","campusDescription":"Boston","scheduleTypeDescription":"Lecture",\
+        "courseTitle":"\(title)","creditHours":4,"maximumEnrollment":40,"enrollment":10,"seatsAvailable":30}
+        """
+        return try! JSONDecoder().decode(BannerSection.self, from: Data(json.utf8))
+    }
+
     static func index(courses: [Course], sections: [CourseSection]) -> CatalogIndex {
         CatalogIndex.build(TermCatalog(
             term: Term(code: "202710", bannerDescription: "Fall 2026 Semester"),
@@ -358,5 +367,57 @@ struct SchedulePlanActionsTests {
         spring.termCode = "202730"
         #expect(ScheduleReorderSuggestions.semester(for: spring, degreePlan: degreePlan, terms: terms, index: nil) == nil)
         #expect(ScheduleReorderSuggestions.semester(for: plan, degreePlan: nil, terms: terms, index: nil) == nil)
+    }
+
+    /// CS 4973 is offered as two topics. Pinning one CRN, adopting a generated schedule,
+    /// refreshing the catalog, and detaching the course for a reorganize must not switch topics.
+    /// `setSection` is the edit that may change the pin.
+    @Test func specialTopicsPinStaysOnItsCRN() {
+        let topicA = Support.section("11111", "CS", "4973", days: [1], start: 9, end: 10)
+        let topicB = Support.section("22222", "CS", "4973", days: [2], start: 9, end: 10)
+        let math = Support.section("33333", "MATH", "2331", days: [3], start: 9, end: 10)
+        let courses = [
+            Course(subject: "CS", number: "4973", title: "Special Topics", description: "", minCredits: 4, maxCredits: 4,
+                   attributes: [], prereqs: nil, coreqs: nil, postreqs: [], specialTopics: true, college: nil, department: nil, detailsLoaded: true),
+            Support.course("MATH", "2331"),
+        ]
+        let index = Support.index(courses: courses, sections: [topicA, topicB, math])
+        var plan = Support.plan(["CS 4973", "MATH 2331"], selected: ["11111"])
+
+        PlanEditing.adoptGeneratedSchedule(["22222", "33333"], into: &plan, index: index)
+        #expect(plan.selectedCRNs == ["11111", "33333"])
+
+        let resolved = ResolvedPlan(plan: plan, index: index)
+        #expect(resolved.entry(for: CourseKey(subject: "CS", number: "4973"))?.chosen?.crn == "11111")
+
+        var catalog = TermCatalog(
+            term: Term(code: "202710", bannerDescription: "Fall 2026 Semester"),
+            courses: courses, sections: [topicA, topicB, math], subjects: [], attributes: [], campuses: []
+        )
+        CatalogBuilder.applyCourseRefresh(&catalog, course: CourseKey(subject: "CS", number: "4973"), banner: [
+            Support.banner("22222", "CS", "4973", title: "Topic B"),
+            Support.banner("11111", "CS", "4973", title: "Topic A"),
+        ])
+        let refreshed = CatalogIndex.build(catalog)
+        let afterRefresh = ResolvedPlan(plan: plan, index: refreshed)
+        #expect(afterRefresh.entry(for: CourseKey(subject: "CS", number: "4973"))?.chosen?.crn == "11111")
+        #expect(!afterRefresh.selectedSections.map(\.crn).contains("22222"))
+
+        CatalogBuilder.applyCourseRefresh(&catalog, course: CourseKey(subject: "CS", number: "4973"), banner: [
+            Support.banner("22222", "CS", "4973", title: "Topic B"),
+        ])
+        let dropped = ResolvedPlan(plan: plan, index: CatalogIndex.build(catalog))
+        #expect(dropped.unlistedCRNs == ["11111"])
+        #expect(dropped.entry(for: CourseKey(subject: "CS", number: "4973"))?.chosen == nil)
+
+        let detached = PlanEditing.selectedCRNs(plan.selectedCRNs, for: CourseKey(subject: "CS", number: "4973"), index: index)
+        #expect(detached == ["11111"])
+        var remaining = plan.selectedCRNs
+        remaining.removeAll { detached.contains($0) }
+        #expect(remaining == ["33333"])
+
+        PlanEditing.setSection("22222", courseCRNs: Set(["11111", "22222"]), in: &plan)
+        #expect(plan.selectedCRNs.contains("22222"))
+        #expect(!plan.selectedCRNs.contains("11111"))
     }
 }

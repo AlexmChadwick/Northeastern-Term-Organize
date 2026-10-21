@@ -157,7 +157,9 @@ enum ScheduleFilterReason: Int, CaseIterable, Hashable, Sendable {
 struct ScheduleCourseInput: Identifiable, Sendable {
     var key: CourseKey
     var isRequired: Bool
-    /// Every section of the course; filters and exclusions are applied by the generator.
+    /// Sections the generator may choose. When the user has pinned a CRN, this is only
+    /// that section (looked up by CRN). Another section of the same subject and number
+    /// is not included.
     var sections: [CourseSection]
     var excludedCRNs: Set<String> = []
     /// Whole credits the course is worth (a range for variable-credit courses), for credit targets.

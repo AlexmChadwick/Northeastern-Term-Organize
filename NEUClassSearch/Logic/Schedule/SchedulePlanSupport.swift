@@ -28,6 +28,7 @@ enum PlanEditing {
 
     /// Chooses `crn` for a course, replacing whichever of the course's sections
     /// was selected before. Pass `nil` to clear the course's selection.
+    /// This is the one edit that may change a pin. Generation does not call it.
     static func setSection(_ crn: String?, courseCRNs: Set<String>, in plan: inout SchedulePlan) {
         plan.selectedCRNs.removeAll { courseCRNs.contains($0) }
         if let crn, !plan.selectedCRNs.contains(crn) { plan.selectedCRNs.append(crn) }
@@ -50,6 +51,31 @@ enum PlanEditing {
 
     static func isFavorite(_ plan: SchedulePlan, sortedCRNs: [String]) -> Bool {
         plan.favoriteCombinations.contains(sortedCRNs)
+    }
+
+    /// Keeps every CRN the user already chose. A generated schedule may add a section
+    /// only for a course that has none. A different section of a pinned course is ignored.
+    /// The pin is the CRN (`index.section(crn:)`), not "a section of this subject and number".
+    static func adoptGeneratedSchedule(_ crns: [String], into plan: inout SchedulePlan, index: CatalogIndex) {
+        var locked = Set<CourseKey>()
+        for crn in plan.selectedCRNs {
+            if let key = index.section(crn: crn)?.courseKey, plan.contains(key) {
+                locked.insert(key)
+            }
+        }
+        var next = plan.selectedCRNs
+        for crn in crns {
+            guard let section = index.section(crn: crn), plan.contains(section.courseKey) else { continue }
+            if locked.contains(section.courseKey) || next.contains(crn) { continue }
+            next.append(crn)
+            locked.insert(section.courseKey)
+        }
+        plan.selectedCRNs = next
+    }
+
+    /// Selected CRNs whose section in this term is `key`. Lookup is by CRN.
+    static func selectedCRNs(_ crns: [String], for key: CourseKey, index: CatalogIndex) -> [String] {
+        crns.filter { index.section(crn: $0)?.courseKey == key }
     }
 
     static func setFavorite(_ favorite: Bool, sortedCRNs: [String], in plan: inout SchedulePlan) {

@@ -400,6 +400,8 @@ struct MacScheduleGeneratorView: View {
 
         var termCode: String
         var courses: [CourseSignature]
+        /// Chosen sections. A change has to regenerate, or a pin would keep the old combinations.
+        var pinnedCRNs: [String]
         var filters: ScheduleFilters
         var preferences: SchedulePreferences
         var sort: ScheduleSortOption
@@ -413,6 +415,7 @@ struct MacScheduleGeneratorView: View {
         return GenerationKey(
             termCode: plan.termCode,
             courses: plan.courses.map { .init(key: $0.key, isRequired: $0.isRequired, excluded: $0.excludedCRNs.sorted()) },
+            pinnedCRNs: plan.selectedCRNs.sorted(),
             filters: plan.filters,
             preferences: plan.preferences ?? SchedulePreferences(),
             sort: sort,
@@ -505,7 +508,8 @@ struct MacScheduleGeneratorView: View {
     }
 
     private func use(_ schedule: GeneratedSchedule) {
-        editor.perform("Use Schedule") { $0.selectedCRNs = schedule.crns }
+        guard let index else { return }
+        editor.perform("Use Schedule") { PlanEditing.adoptGeneratedSchedule(schedule.crns, into: &$0, index: index) }
         onUse()
     }
 

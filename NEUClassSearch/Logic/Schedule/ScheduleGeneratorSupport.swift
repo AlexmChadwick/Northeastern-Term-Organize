@@ -12,13 +12,30 @@ import Foundation
 // MARK: - Generator input and favorites
 
 extension ScheduleCourseInput {
-    /// What the generator works from: one entry per course of `plan`, with every section the term
-    /// lists and the credits rounded up to whole credits.
+    /// Sections generation may use for `key`.
+    ///
+    /// A pinned CRN is a section the user already chose. It is resolved with
+    /// `index.section(crn:)` in this term, never by picking a section of the same
+    /// subject and number. When one or more pins belong to `key`, only those
+    /// sections are returned, in pin order. When none do, every section of the
+    /// course is returned so an unpinned course can still be chosen freely.
+    static func allowedSections(for key: CourseKey, in index: CatalogIndex, pinnedCRNs: [String]) -> [CourseSection] {
+        let pinned = pinnedCRNs.compactMap { crn -> CourseSection? in
+            guard let section = index.section(crn: crn), section.courseKey == key else { return nil }
+            return section
+        }
+        if !pinned.isEmpty { return pinned }
+        return index.sections(for: key)
+    }
+
+    /// What the generator works from: one entry per course of `plan`. Credits are rounded up to
+    /// whole credits. A course with a chosen section contributes only that section.
     static func inputs(for plan: SchedulePlan, index: CatalogIndex) -> [ScheduleCourseInput] {
         plan.courses.map { planCourse in
             let course = index.course(planCourse.key)
             return ScheduleCourseInput(
-                key: planCourse.key, isRequired: planCourse.isRequired, sections: index.sections(for: planCourse.key),
+                key: planCourse.key, isRequired: planCourse.isRequired,
+                sections: allowedSections(for: planCourse.key, in: index, pinnedCRNs: plan.selectedCRNs),
                 excludedCRNs: planCourse.excludedCRNs,
                 minCredits: Int((course?.minCredits ?? 0).rounded(.up)),
                 maxCredits: Int((course?.maxCredits ?? 0).rounded(.up))
@@ -106,14 +123,16 @@ enum ScheduleReorderApplication {
         var removals: [PlanCourseRemoval] = []
         for key in option.movedAway {
             guard let planCourse = plan.course(key) else { continue }
-            let crns = Set(index?.sections(for: key).map(\.crn) ?? [])
+            let sectionCRNs = Set(index?.sections(for: key).map(\.crn) ?? [])
+            let pinned = index.map { PlanEditing.selectedCRNs(plan.selectedCRNs, for: key, index: $0) } ?? []
+            let removalCRNs = Array(sectionCRNs.union(pinned))
             removals.append(PlanCourseRemoval(
                 course: planCourse,
                 index: plan.courses.firstIndex { $0.key == key } ?? plan.courses.count,
-                selectedCRNs: plan.selectedCRNs.filter { crns.contains($0) },
-                favoriteCombinations: plan.favoriteCombinations.filter { $0.contains { crns.contains($0) } }
+                selectedCRNs: pinned,
+                favoriteCombinations: plan.favoriteCombinations.filter { $0.contains { sectionCRNs.contains($0) } }
             ))
-            userData.removeCourse(key, fromPlan: planID, sectionsOfCourse: Array(crns))
+            userData.removeCourse(key, fromPlan: planID, sectionsOfCourse: removalCRNs)
         }
         var added: [CourseKey] = []
         for key in option.movedIn where !(index?.sections(for: key).isEmpty ?? true) {

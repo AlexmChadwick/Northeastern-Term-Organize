@@ -17,16 +17,27 @@ extension ScheduleCourseInput {
     /// A pinned CRN is a section the user already chose. It is resolved with
     /// `index.section(crn:)` in this term, never by picking a section of the same
     /// subject and number. When `pinnedCRNs` contains a section of `key`, only
-    /// those sections are returned, in pin order. When none do, every section of
-    /// the course is returned so an unpinned row can still be chosen freely.
+    /// those sections are returned, in pin order. When a supplied CRN is no longer
+    /// in the catalog and none of the others belong to a different course, the row
+    /// stays locked: no sections, and `unavailablePin` names that CRN. Every section
+    /// of the course is returned only when nothing here is a pin for this row.
     /// Each row passes its own pin, so two topics of one number are two inputs.
-    static func allowedSections(for key: CourseKey, in index: CatalogIndex, pinnedCRNs: [String]) -> [CourseSection] {
+    static func allowedSections(
+        for key: CourseKey, in index: CatalogIndex, pinnedCRNs: [String]
+    ) -> (sections: [CourseSection], unavailablePin: String?) {
         let pinned = pinnedCRNs.compactMap { crn -> CourseSection? in
             guard let section = index.section(crn: crn), section.courseKey == key else { return nil }
             return section
         }
-        if !pinned.isEmpty { return pinned }
-        return index.sections(for: key)
+        if !pinned.isEmpty { return (pinned, nil) }
+        let belongsElsewhere = pinnedCRNs.contains { crn in
+            guard let section = index.section(crn: crn) else { return false }
+            return section.courseKey != key
+        }
+        if let missing = pinnedCRNs.first(where: { index.section(crn: $0) == nil }), !belongsElsewhere {
+            return ([], missing)
+        }
+        return (index.sections(for: key), nil)
     }
 
     /// What the generator works from: one entry per plan row, including two rows of
@@ -36,26 +47,29 @@ extension ScheduleCourseInput {
     static func inputs(for plan: SchedulePlan, index: CatalogIndex) -> [ScheduleCourseInput] {
         plan.courses.map { planCourse in
             let siblings = plan.courses.filter { $0.key == planCourse.key && $0.id != planCourse.id }
-            let pins: [String]
-            if let crn = planCourse.pinnedCRN {
-                pins = [crn]
-            } else if siblings.isEmpty {
-                pins = plan.selectedCRNs
-            } else {
-                pins = []
-            }
-            var sections = allowedSections(for: planCourse.key, in: index, pinnedCRNs: pins)
-            if planCourse.pinnedCRN == nil {
-                let taken = Set(siblings.compactMap(\.pinnedCRN))
-                if !taken.isEmpty { sections.removeAll { taken.contains($0.crn) } }
-            }
             let course = index.course(planCourse.key)
+            let minCredits = Int((course?.minCredits ?? 0).rounded(.up))
+            let maxCredits = Int((course?.maxCredits ?? 0).rounded(.up))
+            if let crn = planCourse.pinnedCRN, !crn.isEmpty {
+                let locked = lockedSections(for: planCourse.key, in: index, pin: crn, fallback: [])
+                return ScheduleCourseInput(
+                    key: planCourse.key, isRequired: planCourse.isRequired,
+                    sections: locked.sections,
+                    excludedCRNs: planCourse.excludedCRNs,
+                    minCredits: minCredits, maxCredits: maxCredits,
+                    unavailablePin: locked.unavailablePin
+                )
+            }
+            let pins = siblings.isEmpty ? plan.selectedCRNs : [String]()
+            var allowed = allowedSections(for: planCourse.key, in: index, pinnedCRNs: pins)
+            let taken = Set(siblings.compactMap(\.pinnedCRN))
+            if !taken.isEmpty { allowed.sections.removeAll { taken.contains($0.crn) } }
             return ScheduleCourseInput(
                 key: planCourse.key, isRequired: planCourse.isRequired,
-                sections: sections,
+                sections: allowed.sections,
                 excludedCRNs: planCourse.excludedCRNs,
-                minCredits: Int((course?.minCredits ?? 0).rounded(.up)),
-                maxCredits: Int((course?.maxCredits ?? 0).rounded(.up))
+                minCredits: minCredits, maxCredits: maxCredits,
+                unavailablePin: allowed.unavailablePin
             )
         }
     }

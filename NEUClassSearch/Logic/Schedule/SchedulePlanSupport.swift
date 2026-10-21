@@ -96,15 +96,26 @@ enum PlanEditing {
 
     /// Keeps every CRN a row already chose. A generated schedule may fill a row that
     /// has none, and that fill is recorded as the row's pin. A different section of
-    /// a pinned row is ignored. Two rows of one number are not one choice: each
-    /// keeps its own CRN. The pin is the CRN (`index.section(crn:)`), not "a section
-    /// of this subject and number".
+    /// a pinned row is ignored, including when that pin is no longer in the catalog.
+    /// Two rows of one number are not one choice: each keeps its own CRN. The pin
+    /// is the CRN (`index.section(crn:)`), not "a section of this subject and number".
     static func adoptGeneratedSchedule(_ crns: [String], into plan: inout SchedulePlan, index: CatalogIndex) {
         func isLocked(_ course: PlanCourse) -> Bool {
             if course.pinnedCRN != nil { return true }
             let siblings = plan.courses.contains { $0.key == course.key && $0.id != course.id }
             if siblings { return false }
-            return plan.selectedCRNs.contains { index.section(crn: $0)?.courseKey == course.key }
+            if plan.selectedCRNs.contains(where: { index.section(crn: $0)?.courseKey == course.key }) {
+                return true
+            }
+            // A chosen CRN the catalog dropped does not resolve to a course key.
+            // That still locks this only row, so Use Schedule does not store a
+            // different section. A CRN that resolves to another course does not.
+            let unlisted = plan.selectedCRNs.contains { index.section(crn: $0) == nil }
+            let foreign = plan.selectedCRNs.contains { crn in
+                guard let section = index.section(crn: crn) else { return false }
+                return section.courseKey != course.key
+            }
+            return unlisted && !foreign
         }
         var locked = Set(plan.courses.filter(isLocked).map(\.id))
         var next = plan.selectedCRNs

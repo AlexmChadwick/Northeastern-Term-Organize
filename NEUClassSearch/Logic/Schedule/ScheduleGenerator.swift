@@ -165,7 +165,30 @@ struct ScheduleCourseInput: Identifiable, Sendable {
     /// Whole credits the course is worth (a range for variable-credit courses), for credit targets.
     var minCredits = 0
     var maxCredits = 0
+    /// Set when this row is locked to a CRN the catalog does not have. `sections` is
+    /// then empty. Generation reports the row as unavailable and does not substitute
+    /// another section of the same subject and number.
+    var unavailablePin: String? = nil
     var id: CourseKey { key }
+
+    /// Candidates for one row.
+    ///
+    /// `pin` is resolved with `index.section(crn:)`. When that section's course is
+    /// `key`, it is the only candidate. When `pin` is set and the catalog has no
+    /// section with that CRN, the row stays locked: `sections` is empty and
+    /// `unavailablePin` is the CRN. A CRN that belongs to a different course is
+    /// locked the same way, so another section of `key` is not substituted.
+    /// `fallback` is used only when `pin` is nil or blank.
+    static func lockedSections(
+        for key: CourseKey, in index: CatalogIndex, pin: String?, fallback: [CourseSection]
+    ) -> (sections: [CourseSection], unavailablePin: String?) {
+        let trimmed = pin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return (fallback, nil) }
+        if let section = index.section(crn: trimmed), section.courseKey == key {
+            return ([section], nil)
+        }
+        return ([], trimmed)
+    }
 }
 
 /// A complete conflict-free schedule with the numbers used to rank it.
@@ -286,6 +309,9 @@ struct ScheduleDiagnostics: Sendable {
         var remainingSections: Int
         /// How many sections each constraint rejected (a section can fail several).
         var rejections: [ScheduleFilterReason: Int]
+        /// The CRN this row is locked to when the catalog no longer has it.
+        /// Empty `totalSections` then means unavailable, not "not offered".
+        var unavailablePin: String? = nil
 
         var id: CourseKey { key }
         var isBlocked: Bool { remainingSections == 0 }
@@ -620,7 +646,8 @@ enum ScheduleGenerator {
             reports.append(.init(
                 key: course.key, isRequired: course.isRequired,
                 totalSections: course.sections.count, remainingSections: remaining.count,
-                rejections: rejections
+                rejections: rejections,
+                unavailablePin: course.unavailablePin
             ))
         }
         result.diagnostics = ScheduleDiagnostics(filters: filters, preferences: preferences, courses: reports)

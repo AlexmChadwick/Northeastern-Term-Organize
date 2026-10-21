@@ -161,6 +161,47 @@ struct ScheduleGeneratorTests {
         #expect(Set(plan.selectedCRNs) == ["11111", "22222"])
     }
 
+    /// A pin the catalog dropped stays locked. Generation has no candidates and
+    /// reports the row unavailable. Use Schedule does not store the other section.
+    @Test func vanishedPinStaysLockedAndUseScheduleDoesNotReplaceIt() {
+        let other = section("22222", "CS", "4973", days: [1], start: 9, end: 10)
+        let index = topicsIndex(other)
+        let key = CourseKey(subject: "CS", number: "4973")
+        var plan = SchedulePlan(name: "Topics", termCode: "202710")
+        plan.courses = [PlanCourse(key: key, colorIndex: 0, pinnedCRN: "11111")]
+        plan.selectedCRNs = ["11111"]
+
+        let inputs = ScheduleCourseInput.inputs(for: plan, index: index)
+        #expect(inputs.map { $0.sections.map(\.crn) } == [[]])
+        #expect(inputs.first?.unavailablePin == "11111")
+
+        let generated = ScheduleGenerator.generate(courses: inputs, filters: ScheduleFilters())
+        #expect(generated.schedules.isEmpty)
+        #expect(!generated.schedules.contains { $0.crns.contains("22222") })
+        #expect(generated.diagnostics.courses.first?.unavailablePin == "11111")
+        #expect(generated.diagnostics.courses.first?.totalSections == 0)
+        let reasons = ScheduleNoResultsText.reasons(for: generated.diagnostics, termName: "Fall 2026")
+        #expect(reasons.contains { $0.title == "CS 4973 is unavailable" })
+        #expect(reasons.contains { $0.detail?.contains("11111") == true })
+        #expect(!reasons.contains { $0.title.contains("isn’t offered") })
+
+        PlanEditing.adoptGeneratedSchedule(["22222"], into: &plan, index: index)
+        #expect(plan.courses.map(\.pinnedCRN) == ["11111"])
+        #expect(plan.selectedCRNs == ["11111"])
+        #expect(!plan.selectedCRNs.contains("22222"))
+
+        // The same lock when the choice lives only in selectedCRNs.
+        var legacy = SchedulePlan(name: "Legacy", termCode: "202710")
+        legacy.courses = [PlanCourse(key: key, colorIndex: 0)]
+        legacy.selectedCRNs = ["11111"]
+        let legacyInputs = ScheduleCourseInput.inputs(for: legacy, index: index)
+        #expect(legacyInputs.first?.sections.isEmpty == true)
+        #expect(legacyInputs.first?.unavailablePin == "11111")
+        PlanEditing.adoptGeneratedSchedule(["22222"], into: &legacy, index: index)
+        #expect(legacy.courses.first?.pinnedCRN == nil)
+        #expect(legacy.selectedCRNs == ["11111"])
+    }
+
     private func topicsIndex(_ sections: CourseSection...) -> CatalogIndex {
         let courses = [
             Course(subject: "CS", number: "4973", title: "Special Topics", description: "", minCredits: 4, maxCredits: 4,

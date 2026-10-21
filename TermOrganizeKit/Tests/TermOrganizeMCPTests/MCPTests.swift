@@ -360,7 +360,7 @@ struct MCPToolTests {
         ])
         #expect(wrong["isError"] as? Bool == true)
         let unknown = (wrong["structuredContent"] as? [String: Any])?["error"] as? [String: Any]
-        #expect(unknown?["code"] as? String == "unknown_crn")
+        #expect(unknown?["code"] as? String == "not_found")
         let still = try call("get_plan", ["plan_id": id])
         #expect(still["revision"] as? Int == 4)
 

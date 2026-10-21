@@ -11,10 +11,10 @@ import SwiftUI
 
 /// What the course list of a schedule can ask its schedule to do.
 struct MacCourseListActions {
-    var chooseSection: (CourseKey) -> Void
+    var chooseSection: (String) -> Void
     var openCourse: (CourseKey) -> Void
-    var toggleRequired: (CourseKey) -> Void
-    var remove: ([CourseKey]) -> Void
+    var toggleRequired: (String) -> Void
+    var remove: ([String]) -> Void
     var addCourse: () -> Void
     var fix: (ScheduleNotice.Fix) -> Void
     var addAutofill: (ScheduleAutofillSuggestion) -> Void
@@ -39,7 +39,7 @@ struct MacScheduleCourseList: View {
     var autofill: [ScheduleAutofillSuggestion]
     @Binding var autofillChoice: String?
     var nudge: ScheduleAutofillSuggestion?
-    @Binding var selection: Set<CourseKey>
+    @Binding var selection: Set<String>
     var actions: MacCourseListActions
 
     /// The class of the "Online / TBA" group whose popover is open.
@@ -75,23 +75,23 @@ struct MacScheduleCourseList: View {
             preferencesSection
         }
         .listStyle(.inset)
-        .contextMenu(forSelectionType: CourseKey.self) { keys in
-            menu(for: keys)
-        } primaryAction: { keys in
-            for key in keys { actions.openCourse(key) }
+        .contextMenu(forSelectionType: String.self) { ids in
+            menu(for: ids)
+        } primaryAction: { ids in
+            for entry in resolved.entries where ids.contains(entry.id) { actions.openCourse(entry.key) }
         }
         .onDeleteCommand {
             if !selection.isEmpty { actions.remove(Array(selection)) }
         }
         .onKeyPress(.return) {
             guard !selection.isEmpty else { return .ignored }
-            for key in selection { actions.openCourse(key) }
+            for entry in resolved.entries where selection.contains(entry.id) { actions.openCourse(entry.key) }
             return .handled
         }
         // ⌘C copies the selected courses (with their chosen sections) as text, ⌘V adds courses copied
         // from a course table.
         .onCopyCommand {
-            let lines = resolved.entries.filter { selection.contains($0.key) }.map { entry in
+            let lines = resolved.entries.filter { selection.contains($0.id) }.map { entry in
                 entry.chosen.map { "\(entry.key.description) \($0.crn)" } ?? entry.key.description
             }
             return lines.isEmpty ? [] : [NSItemProvider(object: lines.joined(separator: "\n") as NSString)]
@@ -129,10 +129,10 @@ struct MacScheduleCourseList: View {
                     entry: entry,
                     termName: termName,
                     conflictingKeys: conflictingKeys(for: entry),
-                    onChooseSection: { actions.chooseSection(entry.key) },
-                    onToggleRequired: { actions.toggleRequired(entry.key) }
+                    onChooseSection: { actions.chooseSection(entry.id) },
+                    onToggleRequired: { actions.toggleRequired(entry.id) }
                 )
-                .tag(entry.key)
+                .tag(entry.id)
             }
             if !resolved.entries.isEmpty {
                 MacListNote {
@@ -197,11 +197,11 @@ struct MacScheduleCourseList: View {
                         ),
                         arrowEdge: .trailing
                     ) {
-                        MacSectionDetailsView(planID: plan.id, crn: pair.section.crn) { key in
+                        MacSectionDetailsView(planID: plan.id, crn: pair.section.crn) { _, entryID in
                             // Let the popover go before the sheet comes.
                             Task {
                                 try? await Task.sleep(for: .milliseconds(200))
-                                actions.chooseSection(key)
+                                actions.chooseSection(entryID)
                             }
                         }
                     }
@@ -249,23 +249,23 @@ struct MacScheduleCourseList: View {
     // MARK: Context menu
 
     @ViewBuilder
-    private func menu(for keys: Set<CourseKey>) -> some View {
-        let ordered = resolved.entries.map(\.key).filter(keys.contains)
-        if let only = ordered.first, ordered.count == 1, let entry = resolved.entry(for: only) {
-            Button("Choose Section…", systemImage: "checklist") { actions.chooseSection(only) }
-            Button("Open in New Window", systemImage: "macwindow") { actions.openCourse(only) }
+    private func menu(for ids: Set<String>) -> some View {
+        let ordered = resolved.entries.filter { ids.contains($0.id) }
+        if let entry = ordered.first, ordered.count == 1 {
+            Button("Choose Section…", systemImage: "checklist") { actions.chooseSection(entry.id) }
+            Button("Open in New Window", systemImage: "macwindow") { actions.openCourse(entry.key) }
             Button(entry.planCourse.isRequired ? "Make Optional" : "Make Required", systemImage: entry.planCourse.isRequired ? "circle.dashed" : "lock") {
-                actions.toggleRequired(only)
+                actions.toggleRequired(entry.id)
             }
             if let section = entry.chosen {
                 Button("Copy CRN", systemImage: "doc.on.doc") { MacPasteboard.copy(section.crn) }
             }
             Divider()
-            Button("Remove from Schedule", systemImage: "trash", role: .destructive) { actions.remove([only]) }
+            Button("Remove from Schedule", systemImage: "trash", role: .destructive) { actions.remove([entry.id]) }
         } else if !ordered.isEmpty {
-            Button("Open in New Windows", systemImage: "macwindow") { for key in ordered { actions.openCourse(key) } }
+            Button("Open in New Windows", systemImage: "macwindow") { for entry in ordered { actions.openCourse(entry.key) } }
             Divider()
-            Button("Remove \(ordered.count) Courses from Schedule", systemImage: "trash", role: .destructive) { actions.remove(ordered) }
+            Button("Remove \(ordered.count) Courses from Schedule", systemImage: "trash", role: .destructive) { actions.remove(ordered.map(\.id)) }
         } else {
             Button("Add Course…", systemImage: "plus", action: actions.addCourse)
         }

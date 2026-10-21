@@ -26,21 +26,63 @@ enum PlanEditing {
         return "Plan \(n)"
     }
 
-    /// Chooses `crn` for a course, replacing whichever of the course's sections
-    /// was selected before. Pass `nil` to clear the course's selection.
-    static func setSection(_ crn: String?, courseCRNs: Set<String>, in plan: inout SchedulePlan) {
-        plan.selectedCRNs.removeAll { courseCRNs.contains($0) }
+    /// Chooses `crn` for one row, replacing that row's pin. Pass `nil` to clear it.
+    /// This is the edit that changes a pin. Generation does not call it.
+    ///
+    /// `entryID` is the row (`PlanCourse.id`). Without it, the call still replaces
+    /// selected CRNs in `courseCRNs`, and updates the pin only when exactly one row
+    /// already holds one of those CRNs. A pin that belongs to another row of the
+    /// same number is left alone. Clearing is refused while another row shares the
+    /// number, and a CRN another row already has is refused.
+    static func setSection(_ crn: String?, courseCRNs: Set<String>, entryID: String? = nil, in plan: inout SchedulePlan) {
+        if let entryID {
+            guard let target = plan.courses.firstIndex(where: { $0.id == entryID }) else { return }
+            let others = plan.courses.enumerated().filter { $0.offset != target && $0.element.key == plan.courses[target].key }
+            if crn == nil, !others.isEmpty { return }
+            if let crn, plan.courses.contains(where: { $0.id != plan.courses[target].id && $0.pinnedCRN == crn }) { return }
+            let reserved = Set(others.compactMap(\.element.pinnedCRN))
+            if let old = plan.courses[target].pinnedCRN, !reserved.contains(old) {
+                plan.selectedCRNs.removeAll { $0 == old }
+            }
+            plan.selectedCRNs.removeAll { courseCRNs.contains($0) && !reserved.contains($0) }
+            plan.courses[target].pinnedCRN = crn
+            if let crn, !plan.selectedCRNs.contains(crn) { plan.selectedCRNs.append(crn) }
+            return
+        }
+
+        let reserved = Set(plan.courses.compactMap(\.pinnedCRN).filter { !courseCRNs.contains($0) })
+        let pinnedInside = plan.courses.indices.filter { plan.courses[$0].pinnedCRN.map { courseCRNs.contains($0) } ?? false }
+        if pinnedInside.count > 1 { return }
+        plan.selectedCRNs.removeAll { courseCRNs.contains($0) && !reserved.contains($0) }
         if let crn, !plan.selectedCRNs.contains(crn) { plan.selectedCRNs.append(crn) }
+        if pinnedInside.count == 1 {
+            plan.courses[pinnedInside[0]].pinnedCRN = crn
+        }
     }
 
     static func setRequired(_ isRequired: Bool, for key: CourseKey, in plan: inout SchedulePlan) {
-        guard let i = plan.courses.firstIndex(where: { $0.key == key }) else { return }
+        for i in plan.courses.indices where plan.courses[i].key == key {
+            plan.courses[i].isRequired = isRequired
+        }
+    }
+
+    static func setRequired(_ isRequired: Bool, entryID: String, in plan: inout SchedulePlan) {
+        guard let i = plan.courses.firstIndex(where: { $0.id == entryID }) else { return }
         plan.courses[i].isRequired = isRequired
     }
 
     /// Adds or removes a section from the "don't use when generating" list.
     static func setExcluded(_ excluded: Bool, crn: String, for key: CourseKey, in plan: inout SchedulePlan) {
         guard let i = plan.courses.firstIndex(where: { $0.key == key }) else { return }
+        setExcluded(excluded, crn: crn, at: i, in: &plan)
+    }
+
+    static func setExcluded(_ excluded: Bool, crn: String, entryID: String, in plan: inout SchedulePlan) {
+        guard let i = plan.courses.firstIndex(where: { $0.id == entryID }) else { return }
+        setExcluded(excluded, crn: crn, at: i, in: &plan)
+    }
+
+    private static func setExcluded(_ excluded: Bool, crn: String, at i: Int, in plan: inout SchedulePlan) {
         if excluded {
             plan.courses[i].excludedCRNs.insert(crn)
         } else {
@@ -50,6 +92,48 @@ enum PlanEditing {
 
     static func isFavorite(_ plan: SchedulePlan, sortedCRNs: [String]) -> Bool {
         plan.favoriteCombinations.contains(sortedCRNs)
+    }
+
+    /// Keeps every CRN a row already chose. A generated schedule may fill a row that
+    /// has none, and that fill is recorded as the row's pin. A different section of
+    /// a pinned row is ignored, including when that pin is no longer in the catalog.
+    /// Two rows of one number are not one choice: each keeps its own CRN. The pin
+    /// is the CRN (`index.section(crn:)`), not "a section of this subject and number".
+    static func adoptGeneratedSchedule(_ crns: [String], into plan: inout SchedulePlan, index: CatalogIndex) {
+        func isLocked(_ course: PlanCourse) -> Bool {
+            if course.pinnedCRN != nil { return true }
+            let siblings = plan.courses.contains { $0.key == course.key && $0.id != course.id }
+            if siblings { return false }
+            if plan.selectedCRNs.contains(where: { index.section(crn: $0)?.courseKey == course.key }) {
+                return true
+            }
+            // A chosen CRN the catalog dropped does not resolve to a course key.
+            // That still locks this only row, so Use Schedule does not store a
+            // different section. A CRN that resolves to another course does not.
+            let unlisted = plan.selectedCRNs.contains { index.section(crn: $0) == nil }
+            let foreign = plan.selectedCRNs.contains { crn in
+                guard let section = index.section(crn: crn) else { return false }
+                return section.courseKey != course.key
+            }
+            return unlisted && !foreign
+        }
+        var locked = Set(plan.courses.filter(isLocked).map(\.id))
+        var next = plan.selectedCRNs
+        for crn in crns {
+            guard let section = index.section(crn: crn) else { continue }
+            guard let i = plan.courses.indices.first(where: {
+                plan.courses[$0].key == section.courseKey && !locked.contains(plan.courses[$0].id)
+            }) else { continue }
+            if !next.contains(crn) { next.append(crn) }
+            if plan.courses[i].pinnedCRN == nil { plan.courses[i].pinnedCRN = crn }
+            locked.insert(plan.courses[i].id)
+        }
+        plan.selectedCRNs = next
+    }
+
+    /// Selected CRNs whose section in this term is `key`. Lookup is by CRN.
+    static func selectedCRNs(_ crns: [String], for key: CourseKey, index: CatalogIndex) -> [String] {
+        crns.filter { index.section(crn: $0)?.courseKey == key }
     }
 
     static func setFavorite(_ favorite: Bool, sortedCRNs: [String], in plan: inout SchedulePlan) {
@@ -83,7 +167,10 @@ enum PlanEditing {
     /// Puts back exactly the course that was removed (at its old position) with its
     /// chosen sections and favorite combinations, leaving everything else as it is.
     static func restore(_ removal: PlanCourseRemoval, in plan: inout SchedulePlan) {
-        guard !plan.contains(removal.course.key) else { return }
+        if plan.courses.contains(where: { $0.id == removal.course.id }) { return }
+        if let pin = removal.course.pinnedCRN, plan.courses.contains(where: { $0.pinnedCRN == pin }) { return }
+        if removal.course.pinnedCRN == nil,
+           plan.courses.contains(where: { $0.key == removal.course.key && $0.pinnedCRN == nil }) { return }
         plan.courses.insert(removal.course, at: min(max(0, removal.index), plan.courses.count))
         for crn in removal.selectedCRNs where !plan.selectedCRNs.contains(crn) { plan.selectedCRNs.append(crn) }
         for combination in removal.favoriteCombinations where !plan.favoriteCombinations.contains(combination) {
@@ -182,7 +269,7 @@ struct ResolvedPlan {
         /// Whether the term's catalog is loaded (otherwise nothing can be resolved).
         let catalogAvailable: Bool
 
-        var id: CourseKey { planCourse.key }
+        var id: String { planCourse.id }
         var key: CourseKey { planCourse.key }
         var color: CourseColor { CourseColor.at(planCourse.colorIndex) }
         var chosen: CourseSection? { selected.first }
@@ -230,10 +317,33 @@ struct ResolvedPlan {
         var claimed = Set<String>()
         for planCourse in plan.courses {
             let all = index?.sections(for: planCourse.key) ?? []
-            let selected = plan.selectedCRNs.compactMap { crn -> CourseSection? in
-                guard let section = bySection[crn], section.courseKey == planCourse.key else { return nil }
-                claimed.insert(crn)
-                return section
+            let siblings = plan.courses.filter { $0.key == planCourse.key && $0.id != planCourse.id }
+            let siblingPins = Set(siblings.compactMap(\.pinnedCRN))
+            let selected: [CourseSection]
+            if let pin = planCourse.pinnedCRN, let section = bySection[pin], section.courseKey == planCourse.key {
+                var chosen = [section]
+                claimed.insert(pin)
+                // A single row can still show a linked component beside its pin.
+                if siblings.isEmpty {
+                    for crn in plan.selectedCRNs where crn != pin {
+                        guard let extra = bySection[crn], extra.courseKey == planCourse.key else { continue }
+                        chosen.append(extra)
+                        claimed.insert(crn)
+                    }
+                }
+                selected = chosen
+            } else if siblings.isEmpty {
+                selected = plan.selectedCRNs.compactMap { crn -> CourseSection? in
+                    guard let section = bySection[crn], section.courseKey == planCourse.key else { return nil }
+                    claimed.insert(crn)
+                    return section
+                }
+            } else {
+                selected = plan.selectedCRNs.compactMap { crn -> CourseSection? in
+                    guard !siblingPins.contains(crn), let section = bySection[crn], section.courseKey == planCourse.key else { return nil }
+                    claimed.insert(crn)
+                    return section
+                }
             }
             entries.append(Entry(planCourse: planCourse, course: index?.course(planCourse.key), allSections: all, selected: selected, catalogAvailable: index != nil))
         }
@@ -282,6 +392,8 @@ struct ResolvedPlan {
     var crnsForRegistration: [String] { selectedSections.map(\.crn) }
 
     func entry(for key: CourseKey) -> Entry? { entries.first { $0.key == key } }
+
+    func entry(id: String) -> Entry? { entries.first { $0.id == id } }
 
     func entry(forCRN crn: String) -> (entry: Entry, section: CourseSection)? {
         for entry in entries {

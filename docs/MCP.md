@@ -230,9 +230,12 @@ Returns up to 8 conflict-free combinations, best score first. A course with no
 sections in that term returns `not_found` (it has no sections in that bundled term).
 When a course includes `crn`, every combination uses that section. The tool does
 not replace it with another section of the same subject and number, even when the
-pin conflicts or fails a constraint. A `crn` that is not a section of that course
-in the term returns `not_found`. Two entries with the same subject and number and
-different `crn` values are two courses. The generator does not merge them.
+pin conflicts or fails a constraint. A `crn` that belongs to a different course
+returns `not_found`. A `crn` the catalog no longer lists keeps that row locked:
+`sections` for it are empty, `schedules` does not substitute another section, and
+the response includes `unavailable` as `[{ "subject", "number", "crn" }]`. Two
+entries with the same subject and number and different `crn` values are two
+courses. The generator does not merge them.
 
 ```json
 {

@@ -25,6 +25,8 @@ struct ScheduleBlockerAnalysis: Sendable {
     var requiredCount = 0
     /// Required courses with no sections in the term.
     var notOffered: [CourseKey] = []
+    /// Required courses locked to a CRN the catalog no longer has.
+    var unavailable: [CourseKey] = []
     /// Required courses whose every section the filters or preferences rule out.
     var filteredOut: [CourseKey] = []
     /// The smallest sets of required courses that leave schedules once they are optional, most schedules first.
@@ -35,7 +37,7 @@ struct ScheduleBlockerAnalysis: Sendable {
     var isIncomplete = false
 
     /// Required courses nothing can be done about without changing the schedule's courses.
-    var unschedulable: [CourseKey] { notOffered + filteredOut }
+    var unschedulable: [CourseKey] { notOffered + unavailable + filteredOut }
 
     /// The courses of the best option: the ones worth moving to another semester.
     var blockingCourses: [CourseKey] { options.first?.courses ?? [] }
@@ -93,7 +95,9 @@ extension ScheduleGenerator {
         var dead: [Int] = []
         for index in required where base.courses[index].isBlocked {
             dead.append(index)
-            if base.courses[index].totalSections == 0 {
+            if base.courses[index].unavailablePin != nil {
+                analysis.unavailable.append(courses[index].key)
+            } else if base.courses[index].totalSections == 0 {
                 analysis.notOffered.append(courses[index].key)
             } else {
                 analysis.filteredOut.append(courses[index].key)

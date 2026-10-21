@@ -229,25 +229,37 @@ extension MCPTool {
                 throw MCPToolError(code: "missing_courses", message: "courses must list at least one subject and number.")
             }
             var inputs: [ScheduleCourseInput] = []
+            var unavailable: [[String: Any]] = []
             for entry in requested {
                 let key = entry.key
                 guard index.course(key) != nil else {
                     throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(index.term.code).")
                 }
-                let sections: [CourseSection]
+                let course = index.course(key)
                 if let crn = entry.crn {
-                    guard let section = index.section(crn: crn), section.courseKey == key else {
+                    if let section = index.section(crn: crn), section.courseKey != key {
                         throw MCPToolError(code: "unknown_crn", message: "CRN \(crn) is not a section of \(key.description) in term \(index.term.code).")
                     }
-                    // The pin is this CRN. Another section of the same number is not a candidate.
-                    sections = [section]
-                } else {
-                    sections = index.sections(for: key)
+                    // A pin the catalog no longer has stays locked. Another section of
+                    // the same number is not a candidate, and the row is unavailable.
+                    let locked = ScheduleCourseInput.lockedSections(for: key, in: index, pin: crn, fallback: [])
+                    if let pin = locked.unavailablePin {
+                        unavailable.append(["subject": key.subject, "number": key.number, "crn": pin])
+                    }
+                    inputs.append(ScheduleCourseInput(
+                        key: key,
+                        isRequired: true,
+                        sections: locked.sections,
+                        minCredits: Int(course?.minCredits ?? 0),
+                        maxCredits: Int(course?.maxCredits ?? 0),
+                        unavailablePin: locked.unavailablePin
+                    ))
+                    continue
                 }
+                let sections = index.sections(for: key)
                 guard !sections.isEmpty else {
                     throw MCPToolError(code: "not_offered", message: "\(key.description) has no sections in term \(index.term.code).")
                 }
-                let course = index.course(key)
                 inputs.append(ScheduleCourseInput(
                     key: key,
                     isRequired: true,
@@ -275,7 +287,9 @@ extension MCPTool {
                     "sections": schedule.sections.map { sectionJSON($0) },
                 ]
             }
-            return ["term": index.term.code, "schedules": schedules]
+            var payload: [String: Any] = ["term": index.term.code, "schedules": schedules]
+            if !unavailable.isEmpty { payload["unavailable"] = unavailable }
+            return payload
         },
         MCPTool(
             name: "reorganize_plan",

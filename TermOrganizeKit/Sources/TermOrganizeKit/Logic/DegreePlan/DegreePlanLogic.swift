@@ -154,8 +154,9 @@ enum DegreePlanAnalysis {
         return texts.filter { seen.insert($0).inserted }
     }
 
-    /// Courses planned (or completed) more than once. A topics course taken again on another
-    /// topic isn't a duplicate (`DegreeCourseRepeats`): it counts each time.
+    /// Courses planned (or completed) more than once. Another section of the same number
+    /// isn't a duplicate when `DegreeCourseRepeats` says it counts on its own: a different
+    /// CRN, or (when neither row has a CRN) a topics course taken again on another topic.
     static func duplicateKeys(in plan: DegreePlan) -> Set<CourseKey> {
         let planned = plan.terms.flatMap(\.courses)
         var duplicates = Set<CourseKey>()
@@ -316,7 +317,6 @@ enum DegreePlanAutofill {
             }
         }
 
-        let done = draft.completedKeys
         for plan in schedulePlans where plan.isPrimary && !plan.courses.isEmpty {
             if let window = TermCalendar.approximateWindow(for: plan.termCode), window.upperBound < now { continue }
             let term = Term(code: plan.termCode, bannerDescription: "")
@@ -329,18 +329,38 @@ enum DegreePlanAutofill {
                 draft.terms.append(DegreePlanTerm(season: season, year: term.calendarYear))
                 termPosition = draft.terms.count - 1
             }
-            let present = Set(draft.terms[termPosition].courses.compactMap(\.key))
-            for planCourse in plan.courses where !present.contains(planCourse.key) && !done.contains(planCourse.key) {
+            var existing = draft.terms[termPosition].courses + draft.completed
+            for planCourse in plan.courses {
+                let crn = chosenCRN(planCourse, in: plan, index: index)
+                let represented = existing.contains { row in
+                    guard row.key == planCourse.key else { return false }
+                    if crn == nil || row.crn == nil { return true }
+                    return row.crn == crn
+                }
+                if represented { continue }
                 let course = index?.course(planCourse.key)
-                draft.terms[termPosition].courses.append(DegreePlanCourse(
+                let added = DegreePlanCourse(
                     key: planCourse.key,
                     title: DegreePlanFormat.exportTitle(course?.title ?? planCourse.key.description),
-                    credits: course?.maxCredits ?? 4
-                ))
+                    credits: course?.maxCredits ?? 4,
+                    crn: crn
+                )
+                draft.terms[termPosition].courses.append(added)
+                existing.append(added)
             }
         }
         draft.sortTerms()
         return draft
+    }
+
+    /// The section a schedule row should copy onto a degree plan. A stored pin wins.
+    /// A single row whose choice lives only in `selectedCRNs` still copies that CRN.
+    private static func chosenCRN(_ planCourse: PlanCourse, in plan: SchedulePlan, index: CatalogIndex?) -> String? {
+        if let crn = planCourse.pinnedCRN, !crn.isEmpty { return crn }
+        let siblings = plan.courses.contains { $0.key == planCourse.key && $0.id != planCourse.id }
+        guard !siblings, let index else { return nil }
+        let matches = plan.selectedCRNs.filter { index.section(crn: $0)?.courseKey == planCourse.key }
+        return matches.count == 1 ? matches[0] : nil
     }
 
     /// The next few semesters after the plan's last one (or after now), for "Add semester".

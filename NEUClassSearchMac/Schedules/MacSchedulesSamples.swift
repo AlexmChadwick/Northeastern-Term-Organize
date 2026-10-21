@@ -245,7 +245,7 @@ extension MacSampleData {
             return AnyView(MacSectionPickerSheet(planID: plan.id, courseKey: key))
         case "scheduleSectionDetails":
             guard let plan = planA, let crn = plan.selectedCRNs.first else { return nil }
-            return AnyView(MacSectionDetailsView(planID: plan.id, crn: crn, undoManager: nil) { _ in })
+            return AnyView(MacSectionDetailsView(planID: plan.id, crn: crn, undoManager: nil) { _, _ in })
         case "scheduleAddCourse":
             guard let plan = planA else { return nil }
             return AnyView(MacAddCourseView(planID: plan.id))

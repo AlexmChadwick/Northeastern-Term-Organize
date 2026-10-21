@@ -89,7 +89,9 @@ enum ScheduleNoResultsText {
         let noun = option.scheduleCount == 1 && !option.isLowerBound ? "schedule" : "schedules"
         parts.append(option.isLowerBound ? "\(count)+ \(noun)" : "\(count) \(noun)")
         for key in option.courses {
-            if blockers.notOffered.contains(key) {
+            if blockers.unavailable.contains(key) {
+                parts.append("\(key)'s chosen section is unavailable")
+            } else if blockers.notOffered.contains(key) {
                 parts.append("\(key) isn’t offered in \(termName)")
             } else if blockers.filteredOut.contains(key) {
                 parts.append("your rules rule out every \(key) section")
@@ -119,7 +121,13 @@ enum ScheduleNoResultsText {
         var result: [Reason] = []
 
         for report in diagnostics.courses where report.isBlocked && report.isRequired {
-            if report.totalSections == 0 {
+            if let pin = report.unavailablePin {
+                result.append(Reason(
+                    symbol: "lock",
+                    title: "\(report.key) is unavailable",
+                    detail: "CRN \(pin) is no longer in the \(termName) catalog. Another section was not substituted."
+                ))
+            } else if report.totalSections == 0 {
                 result.append(Reason(symbol: "questionmark.folder", title: "\(report.key) isn’t offered in \(termName)", detail: "Remove it from the schedule or make it optional."))
             } else {
                 result.append(Reason(

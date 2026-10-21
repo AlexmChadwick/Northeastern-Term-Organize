@@ -80,8 +80,8 @@ struct DegreeRequirementsTests {
         try #require(ProgramCatalogParser.requirements(fromHTML: programPage, year: CatalogYear(startYear: 2023), program: program))
     }
 
-    static func course(_ code: String, _ credits: Double = 4, _ title: String = "") -> DegreePlanCourse {
-        DegreePlanCourse(key: CourseKey(string: code), title: title, credits: credits)
+    static func course(_ code: String, _ credits: Double = 4, _ title: String = "", crn: String? = nil) -> DegreePlanCourse {
+        DegreePlanCourse(key: CourseKey(string: code), title: title, credits: credits, crn: crn)
     }
 
     /// A student in the human-centered computing concentration.
@@ -474,6 +474,42 @@ struct DegreeRequirementsTests {
         #expect(DegreePlanAnalysis.duplicateKeys(in: plan) == [CourseKey(subject: "MKTG", number: "2602")])
     }
 
+    /// The same number counts twice when each row has its own CRN, once when it does not,
+    /// and once when both rows name the same CRN. Titles here are "Seminar", not a topics title.
+    @Test func distinctCRNsCountSeparately() throws {
+        let requirements = try Self.requirements()
+        let electives = try #require(requirements.allRules.first { $0.label.hasPrefix("Complete 8 semester hours of CS") })
+        let key = CourseKey(subject: "CS", number: "4973")
+
+        var separate = DegreePlan(name: "Seminars")
+        separate.completed = [
+            Self.course("CS 4973", 4, "Seminar", crn: "11111"),
+            Self.course("CS 4973", 4, "Seminar", crn: "22222"),
+        ]
+        let both = DegreeAudit.run(plan: separate, requirements: requirements)
+        let counted = try #require(both.result(for: electives.id))
+        #expect(counted.status == .complete)
+        #expect(counted.used.map(\.id).sorted() == ["CS 4973", "CS 4973 (2)"])
+        #expect(counted.used.reduce(0) { $0 + $1.credits } == 8)
+        #expect(DegreePlanAnalysis.duplicateKeys(in: separate).isEmpty)
+
+        var plain = DegreePlan(name: "Seminars")
+        plain.completed = [Self.course("CS 4973", 4, "Seminar"), Self.course("CS 4973", 4, "Seminar")]
+        let once = try #require(DegreeAudit.run(plan: plain, requirements: requirements).result(for: electives.id))
+        #expect(once.used.map(\.id) == ["CS 4973"])
+        #expect(once.used.reduce(0) { $0 + $1.credits } == 4)
+        #expect(DegreePlanAnalysis.duplicateKeys(in: plain) == [key])
+
+        var repeated = DegreePlan(name: "Seminars")
+        repeated.completed = [
+            Self.course("CS 4973", 4, "Seminar", crn: "11111"),
+            Self.course("CS 4973", 4, "Seminar", crn: "11111"),
+        ]
+        let same = try #require(DegreeAudit.run(plan: repeated, requirements: requirements).result(for: electives.id))
+        #expect(same.used.map(\.id) == ["CS 4973"])
+        #expect(DegreePlanAnalysis.duplicateKeys(in: repeated) == [key])
+    }
+
     /// A required course with alternatives gives up the one another list needs when the plan
     /// has the other alternative too.
     @Test func requiredAlternativesMakeRoom() throws {
@@ -615,7 +651,10 @@ struct DegreeRequirementsTests {
         #expect(done.satisfiedCount == done.totalCount)
 
         let short = audit(["CS 3000", "CS 3200", "CS 1210"], planned: ["CS 3500"])
-        #expect(short.noteChecks.first { if case .majorHours = $0.kind { true } else { false } }?.status == .partial)
+        let shortHours = try #require(short.noteChecks.first { if case .majorHours = $0.kind { true } else { false } })
+        // 4 (CS 3000) + 4 (CS 3200) earned, 4 (CS 3500) planned. Not 12 of 16 with the 4 planned again.
+        #expect(shortHours.status == .partial)
+        #expect(shortHours.detail == "8 of 16 semester hours · 4 planned")
         #expect(short.noteChecks.first { if case .coop = $0.kind { true } else { false } }?.detail == "No co-op in the plan")
         #expect(short.satisfiedCount < short.totalCount)
     }

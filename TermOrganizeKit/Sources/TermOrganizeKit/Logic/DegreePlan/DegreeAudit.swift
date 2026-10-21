@@ -23,8 +23,9 @@ import Foundation
 /// can use another one. Finally, if a requirement is still short although the plan has courses
 /// that could meet it, every way of matching courses to requirements is searched for one that
 /// meets more of them, so the plan is never shown short of a requirement it can meet. A topics
-/// course taken again on another topic counts each time; a repeated course counts once. This is
-/// a planning aid; the official audit is the registrar's.
+/// course taken again on another topic counts each time, and so do two rows that each name a
+/// different CRN. A repeated course counts once. This is a planning aid; the official audit
+/// is the registrar's.
 ///
 /// Courses that count as one another (`CourseEquivalences`: a renumbered course and its
 /// replacement, whichever department) are interchangeable here: a requirement naming CS 2100 is
@@ -54,9 +55,12 @@ struct DegreeAudit: Sendable {
         /// The course the requirement names, when this one counts as it because they are
         /// equivalent (CS 2510 counting as CS 2100). Nil when it counts as itself.
         var satisfies: CourseKey?
-        /// 0 the first time a course is in the plan; 1, 2… for a topics course taken again on
-        /// another topic, which counts on its own.
+        /// 0 the first time a course is in the plan; 1, 2… for another section of the same
+        /// number that counts on its own (a different topic, or a different CRN).
         var instance = 0
+        /// The section, when the plan row names one. Two rows count separately when
+        /// both have a CRN and the CRNs differ.
+        var crn: String? = nil
 
         /// `CS 4973`, or `CS 4973 (2)` for the second time a topics course is taken.
         var id: String { instance == 0 ? key.description : "\(key.description) (\(instance + 1))" }
@@ -161,8 +165,9 @@ struct DegreeAudit: Sendable {
         var note: String
         var kind: Kind
         var status: Status
-        /// `74 of 72 semester hours · 8 planned`, `COOP 3946 completed`, `No co-op in the plan`,
-        /// `11 of 13 complete or planned`.
+        /// `66 of 72 semester hours · 8 planned`, `COOP 3946 completed`, `No co-op in the plan`,
+        /// `11 of 13 complete or planned`. The first number is credits already earned. Planned
+        /// credits are the separate ` · N planned` suffix, not part of that first number.
         var detail: String
         /// The parts of a check made of several, in the catalog's order (each NUpath
         /// requirement, each universitywide minimum). Empty for a single check.
@@ -262,6 +267,31 @@ struct DegreeAudit: Sendable {
         audit.attributes = attributes
         return audit
     }
+
+    /// How a semester-hour minimum stands, for the university minimum, the program total, and
+    /// hours in the major.
+    ///
+    /// `completed` is credits already earned. `planned` is credits in later terms. The line is
+    /// `"\(completed) of \(required) semester hours"`, then `" · \(planned) planned"` when
+    /// `planned > 0`. The first number is `completed` alone. It is not `completed + planned`.
+    ///
+    /// Status matches the other requirement rows. `.complete` when `completed >= required`
+    /// (a green check). `.planned` when completed credits fall short but
+    /// `completed + planned >= required` (a blue calendar). `.partial` when
+    /// `completed + planned > 0` and that sum is still under `required` (an orange half circle).
+    /// `.missing` when both are 0.
+    static func hoursStatus(completed: Double, planned: Double, required: Double) -> (Status, String) {
+        let status: Status = completed >= required ? .complete
+            : completed + planned >= required ? .planned
+            : completed + planned > 0 ? .partial : .missing
+        var detail = "\(hoursText(completed)) of \(hoursText(required)) semester hours"
+        if planned > 0 { detail += " · \(hoursText(planned)) planned" }
+        return (status, detail)
+    }
+
+    private static func hoursText(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...1)))
+    }
 }
 
 // MARK: - Engine
@@ -345,7 +375,7 @@ private struct AuditEngine {
         func offer(_ course: DegreePlanCourse, semester: String?) {
             defer { order += 1 }
             guard let key = course.key else { return }
-            var use = CourseUse(key: key, title: course.title, credits: course.credits, semester: semester, order: order)
+            var use = CourseUse(key: key, title: course.title, credits: course.credits, semester: semester, order: order, crn: course.crn)
             let earlier = instances[key, default: []].compactMap { pool[$0] }
             if let repeated = earlier.first(where: { !Self.countsSeparately(use, $0) }) {
                 // The same class again: keep the better listing. Completed beats planned; then
@@ -369,7 +399,9 @@ private struct AuditEngine {
     }
 
     static func countsSeparately(_ a: CourseUse, _ b: CourseUse) -> Bool {
-        DegreeCourseRepeats.countsSeparately(title: a.title, credits: a.credits, from: b.title, credits: b.credits)
+        DegreeCourseRepeats.countsSeparately(
+            title: a.title, credits: a.credits, crn: a.crn, from: b.title, credits: b.credits, otherCRN: b.crn
+        )
     }
 
     mutating func run() -> DegreeAudit {
@@ -671,12 +703,7 @@ private struct AuditEngine {
         }
         let completed = counted.values.filter(\.isCompleted).reduce(0) { $0 + max(0, $1.credits) }
         let planned = counted.values.filter { !$0.isCompleted }.reduce(0) { $0 + max(0, $1.credits) }
-        let status: DegreeAudit.Status = completed >= required ? .complete
-            : completed + planned >= required ? .planned
-            : completed + planned > 0 ? .partial : .missing
-        func hours(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...1))) }
-        var detail = "\(hours(completed + planned)) of \(hours(required)) semester hours"
-        if planned > 0 { detail += " · \(hours(planned)) planned" }
+        let (status, detail) = DegreeAudit.hoursStatus(completed: completed, planned: planned, required: required)
         return DegreeAudit.NoteCheck(sectionID: sectionID, note: note, kind: .majorHours(required: required), status: status, detail: detail)
     }
 
@@ -807,7 +834,7 @@ private struct AuditEngine {
         let planned = pool.values.filter { !$0.isCompleted }.reduce(0) { $0 + max(0, $1.credits) }
         var items: [DegreeAudit.NoteCheck.Item] = []
         if let total = minimums.totalHours {
-            let (status, detail) = Self.hoursStatus(completed: completed, planned: planned, required: total)
+            let (status, detail) = DegreeAudit.hoursStatus(completed: completed, planned: planned, required: total)
             items.append(.init(id: "total-hours", title: "\(Self.hours(total)) total semester hours", status: status, detail: detail))
         }
         if minimums.requiresExperientialLearning {
@@ -828,7 +855,7 @@ private struct AuditEngine {
         }
         let checked = items.filter { $0.status != nil }
         guard let status = checked.compactMap(\.status).min() else { return nil }
-        // `134 of 128 semester hours · 29 planned · GPA and residency not checked`.
+        // `105 of 128 semester hours · 30 planned · GPA and residency not checked`.
         let names = ["experiential": "experiential learning", "gpa": "GPA", "residency": "residency"]
         let unchecked = items.filter { $0.status == nil }.compactMap { names[$0.id] }
         var detail = checked.map(\.detail).joined(separator: " · ")
@@ -841,18 +868,8 @@ private struct AuditEngine {
     private func totalHoursCheck(sectionID: String, note: String, required: Double) -> DegreeAudit.NoteCheck {
         let completed = pool.values.filter(\.isCompleted).reduce(0) { $0 + max(0, $1.credits) }
         let planned = pool.values.filter { !$0.isCompleted }.reduce(0) { $0 + max(0, $1.credits) }
-        let (status, detail) = Self.hoursStatus(completed: completed, planned: planned, required: required)
+        let (status, detail) = DegreeAudit.hoursStatus(completed: completed, planned: planned, required: required)
         return DegreeAudit.NoteCheck(sectionID: sectionID, note: note, kind: .totalHours(required: required), status: status, detail: detail)
-    }
-
-    /// `136 of 134 semester hours · 32 planned`.
-    private static func hoursStatus(completed: Double, planned: Double, required: Double) -> (DegreeAudit.Status, String) {
-        let status: DegreeAudit.Status = completed >= required ? .complete
-            : completed + planned >= required ? .planned
-            : completed + planned > 0 ? .partial : .missing
-        var detail = "\(hours(completed + planned)) of \(hours(required)) semester hours"
-        if planned > 0 { detail += " · \(hours(planned)) planned" }
-        return (status, detail)
     }
 
     // MARK: Surplus hours

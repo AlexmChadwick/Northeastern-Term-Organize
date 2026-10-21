@@ -141,6 +141,27 @@ struct MCPToolTests {
         #expect(wrong["isError"] as? Bool == true)
     }
 
+    /// A pin the bundled catalog does not have stays locked. The other sections of
+    /// that number are not candidates, and the row is reported as unavailable.
+    @Test func vanishedPinIsUnavailableAndIsNotReplaced() throws {
+        let result = try call("suggest_schedule", [
+            "term": "202730",
+            "courses": [
+                ["subject": "CS", "number": "4973", "crn": "99999"],
+                ["subject": "CS", "number": "3000"],
+            ],
+        ])
+        let schedules = result["schedules"] as? [[String: Any]] ?? []
+        #expect(schedules.isEmpty)
+        let crns = schedules.flatMap { $0["crns"] as? [String] ?? [] }
+        #expect(!crns.contains("11111") && !crns.contains("22222") && !crns.contains("33333"))
+        let unavailable = try #require(result["unavailable"] as? [[String: Any]])
+        #expect(unavailable.count == 1)
+        #expect(unavailable.first?["subject"] as? String == "CS")
+        #expect(unavailable.first?["number"] as? String == "4973")
+        #expect(unavailable.first?["crn"] as? String == "99999")
+    }
+
     /// Two special-topics sections share a number. Reorganize keeps each pin, and
     /// does not treat a different section of that number as the pinned one.
     @Test func reorganizeKeepsPinnedSpecialTopicsSections() throws {

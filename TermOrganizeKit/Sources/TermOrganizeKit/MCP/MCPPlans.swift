@@ -235,8 +235,14 @@ extension TermOrganizeMCPServer {
                 plan.courses = keys.map { key in
                     plan.course(key) ?? PlanCourse(key: key, colorIndex: plan.nextColorIndex)
                 }
-                let allowed = Set(keys.flatMap { library.index(for: code)?.sections(for: $0).map(\.crn) ?? [] })
-                plan.selectedCRNs = plan.selectedCRNs.filter { allowed.contains($0) }
+                // Keep a chosen CRN only when that section is still one of the courses
+                // in this term. Look the section up by CRN. Do not substitute another
+                // section of the same subject and number, and do not call select.
+                let remaining = Set(keys)
+                plan.selectedCRNs = plan.selectedCRNs.filter { crn in
+                    guard let section = library.index(for: code)?.section(crn: crn) else { return false }
+                    return remaining.contains(section.courseKey)
+                }
                 rebuilt.append(plan)
             }
             group.plans = rebuilt.isEmpty ? group.plans : rebuilt

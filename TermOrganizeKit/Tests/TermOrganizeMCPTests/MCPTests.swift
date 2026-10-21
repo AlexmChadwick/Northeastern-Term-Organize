@@ -103,6 +103,108 @@ struct MCPToolTests {
         #expect(crns.contains("2004"))
     }
 
+    /// CS 4973 is two topics. A request that names one CRN must not get the other,
+    /// including when a constraint would fit the other topic and not the pin.
+    @Test func suggestScheduleDoesNotReplaceAPinnedCRN() throws {
+        let pinned = try call("suggest_schedule", [
+            "term": "202730",
+            "courses": [["subject": "CS", "number": "4973", "crn": "11111"]],
+        ])
+        let schedules = pinned["schedules"] as? [[String: Any]] ?? []
+        let crns = schedules.flatMap { $0["crns"] as? [String] ?? [] }
+        #expect(crns == ["11111"])
+        #expect(!crns.contains("22222"))
+        #expect(!crns.contains("33333"))
+
+        let filtered = try call("suggest_schedule", [
+            "term": "202730",
+            "courses": [["subject": "CS", "number": "4973", "crn": "11111"]],
+            "constraints": ["no_classes_before": "10:00"],
+        ])
+        let blocked = filtered["schedules"] as? [[String: Any]] ?? []
+        #expect(blocked.isEmpty)
+
+        let open = try call("suggest_schedule", [
+            "term": "202730",
+            "courses": [["subject": "CS", "number": "4973"]],
+            "constraints": ["no_classes_before": "10:00"],
+        ])
+        let openCRNs = Set((open["schedules"] as? [[String: Any]] ?? []).flatMap { $0["crns"] as? [String] ?? [] })
+        #expect(openCRNs.contains("22222"))
+        #expect(openCRNs.contains("33333"))
+        #expect(!openCRNs.contains("11111"))
+
+        let wrong = server.call(name: "suggest_schedule", arguments: [
+            "term": "202730",
+            "courses": [["subject": "CS", "number": "4973", "crn": "2001"]],
+        ])
+        #expect(wrong["isError"] as? Bool == true)
+    }
+
+    /// Two special-topics sections share a number. Reorganize keeps each pin, and
+    /// does not treat a different section of that number as the pinned one.
+    @Test func reorganizeKeepsPinnedSpecialTopicsSections() throws {
+        let kept = try call("reorganize_plan", [
+            "plan": [
+                "terms": [
+                    ["term": "202710", "courses": [["subject": "CS", "number": "4973", "crn": "11111"]]],
+                    ["term": "202730", "courses": [["subject": "CS", "number": "4973", "crn": "22222"]]],
+                ],
+            ],
+        ])
+        #expect((kept["moves"] as? [Any])?.isEmpty == true)
+        let terms = (kept["plan"] as? [String: Any])?["terms"] as? [[String: Any]] ?? []
+        let fall = try #require(terms.first { $0["term"] as? String == "202710" })
+        let spring = try #require(terms.first { $0["term"] as? String == "202730" })
+        let fallCourses = fall["courses"] as? [[String: Any]] ?? []
+        let springCourses = spring["courses"] as? [[String: Any]] ?? []
+        #expect(fallCourses.map { $0["crn"] as? String } == ["11111"])
+        #expect(springCourses.map { $0["crn"] as? String } == ["22222"])
+
+        // 33333 is only in the spring catalog. Fall still offers other CS 4973 sections.
+        let moved = try call("reorganize_plan", [
+            "plan": [
+                "terms": [
+                    ["term": "202710", "courses": [["subject": "CS", "number": "4973", "crn": "33333"]]],
+                    ["term": "202730", "courses": []],
+                ],
+            ],
+        ])
+        let moves = moved["moves"] as? [[String: Any]] ?? []
+        #expect(moves.count == 1)
+        #expect(moves.first?["crn"] as? String == "33333")
+        #expect(moves.first?["to_term"] as? String == "202730")
+        let movedTerms = (moved["plan"] as? [String: Any])?["terms"] as? [[String: Any]] ?? []
+        let movedSpring = try #require(movedTerms.first { $0["term"] as? String == "202730" })
+        let movedFall = try #require(movedTerms.first { $0["term"] as? String == "202710" })
+        #expect((movedFall["courses"] as? [Any])?.isEmpty == true)
+        #expect((movedSpring["courses"] as? [[String: Any]])?.map { $0["crn"] as? String } == ["33333"])
+    }
+
+    @Test func applyReorganizeDoesNotReplaceAPinnedCRN() throws {
+        let id = try planID(try call("create_plan", ["name": "Topics", "terms": ["202710", "202730"]]))
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202710", "subject": "CS", "number": "4973", "crn": "11111", "expected_revision": 1,
+        ])
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "22222", "expected_revision": 2,
+        ])
+        let changed = try call("set_section", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "33333", "expected_revision": 3,
+        ])
+        let before = (changed["terms"] as? [[String: Any]] ?? []).first { $0["term"] as? String == "202730" }
+        let beforeCRN = ((before?["courses"] as? [[String: Any]])?.first)?["crn"] as? String
+        #expect(beforeCRN == "33333")
+
+        let applied = try call("apply_reorganize", ["plan_id": id, "expected_revision": 4])
+        let terms = applied["terms"] as? [[String: Any]] ?? []
+        let fall = try #require(terms.first { $0["term"] as? String == "202710" })
+        let spring = try #require(terms.first { $0["term"] as? String == "202730" })
+        #expect(((fall["courses"] as? [[String: Any]])?.first)?["crn"] as? String == "11111")
+        #expect(((spring["courses"] as? [[String: Any]])?.first)?["crn"] as? String == "33333")
+        #expect((applied["moves"] as? [Any])?.isEmpty == true)
+    }
+
     @Test func reorganizePlanMovesACourseThatIsNotOffered() throws {
         let result = try call("reorganize_plan", [
             "plan": [
@@ -649,17 +751,24 @@ enum MCPFixture {
         CatalogLibrary(indexes: [
             "202710": CatalogIndex.build(catalog(term: "202710", courses: [
                 course("CS", "3000", "Algorithms", ["NCFQ"]),
+                course("CS", "4973", "Special Topics", []),
             ], sections: [
                 section(crn: "1001", subject: "CS", number: "3000", day: .monday, email: "ada@northeastern.edu"),
+                section(crn: "11111", subject: "CS", number: "4973", day: .monday, email: nil),
+                section(crn: "22222", subject: "CS", number: "4973", day: .wednesday, email: nil),
             ])),
             "202730": CatalogIndex.build(catalog(term: "202730", courses: [
                 course("CS", "3000", "Algorithms", ["NCFQ"]),
                 course("CS", "3500", "OOD", ["NCFQ"]),
+                course("CS", "4973", "Special Topics", []),
             ], sections: [
                 section(crn: "2001", subject: "CS", number: "3000", day: .monday, email: "ada@gmail.com ada@northeastern.edu"),
                 section(crn: "2002", subject: "CS", number: "3000", day: .tuesday, email: "ada@gmail.com"),
                 section(crn: "2003", subject: "CS", number: "3500", day: .monday, email: "ada@neu.edu"),
                 section(crn: "2004", subject: "CS", number: "3500", day: .wednesday, email: nil),
+                section(crn: "11111", subject: "CS", number: "4973", day: .monday, email: nil),
+                section(crn: "22222", subject: "CS", number: "4973", day: .wednesday, start: 14, email: nil),
+                section(crn: "33333", subject: "CS", number: "4973", day: .tuesday, start: 10, email: nil),
             ])),
         ])
     }
@@ -692,9 +801,9 @@ enum MCPFixture {
         )
     }
 
-    private static func section(crn: String, subject: String, number: String, day: DaySet, email: String?) -> CourseSection {
+    private static func section(crn: String, subject: String, number: String, day: DaySet, start: Int = 9, email: String?) -> CourseSection {
         let meeting = Meeting(
-            days: day, start: 9 * 60, end: 10 * 60,
+            days: day, start: start * 60, end: (start + 1) * 60,
             buildingCode: "WVH", building: "West Village H", room: "210",
             campusCode: "BOS", kind: "Class", startDate: nil, endDate: nil
         )

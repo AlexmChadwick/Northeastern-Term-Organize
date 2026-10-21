@@ -206,12 +206,12 @@ extension MCPTool {
         },
         MCPTool(
             name: "suggest_schedule",
-            description: "Conflict-free section combinations for the requested courses, best first. Constraints can keep classes after a time, before a time, or off certain days.",
+            description: "Conflict-free section combinations for the requested courses, best first. A course with a crn uses only that section. Constraints can keep classes after a time, before a time, or off certain days.",
             properties: [
                 "term": stringSchema,
                 "courses": ["type": "array", "items": [
                     "type": "object",
-                    "properties": ["subject": stringSchema, "number": stringSchema],
+                    "properties": ["subject": stringSchema, "number": stringSchema, "crn": stringSchema],
                     "required": ["subject", "number"],
                 ]],
                 "constraints": ["type": "object", "properties": [
@@ -224,16 +224,26 @@ extension MCPTool {
             readOnly: true
         ) { arguments, server in
             let index = try server.catalog(arguments)
-            let requested = courseList(arguments["courses"])
+            let requested = courseEntries(arguments["courses"])
             guard !requested.isEmpty else {
                 throw MCPToolError(code: "missing_courses", message: "courses must list at least one subject and number.")
             }
             var inputs: [ScheduleCourseInput] = []
-            for key in requested {
+            for entry in requested {
+                let key = entry.key
                 guard index.course(key) != nil else {
                     throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(index.term.code).")
                 }
-                let sections = index.sections(for: key)
+                let sections: [CourseSection]
+                if let crn = entry.crn {
+                    guard let section = index.section(crn: crn), section.courseKey == key else {
+                        throw MCPToolError(code: "unknown_crn", message: "CRN \(crn) is not a section of \(key.description) in term \(index.term.code).")
+                    }
+                    // The pin is this CRN. Another section of the same number is not a candidate.
+                    sections = [section]
+                } else {
+                    sections = index.sections(for: key)
+                }
                 guard !sections.isEmpty else {
                     throw MCPToolError(code: "not_offered", message: "\(key.description) has no sections in term \(index.term.code).")
                 }
@@ -269,7 +279,7 @@ extension MCPTool {
         },
         MCPTool(
             name: "reorganize_plan",
-            description: "Move courses into terms the plan already has, when the bundled catalog for that term offers the course and prerequisites that are also in the plan stay in an earlier term. Does not add a semester and does not save.",
+            description: "Move courses into terms the plan already has, when the bundled catalog for that term offers the course and prerequisites that are also in the plan stay in an earlier term. A course with a crn is that section, not every section of its number. Does not add a semester and does not save.",
             properties: [
                 "plan_id": stringSchema,
                 "plan": ["type": "object", "properties": [
@@ -279,7 +289,7 @@ extension MCPTool {
                             "term": stringSchema,
                             "courses": ["type": "array", "items": [
                                 "type": "object",
-                                "properties": ["subject": stringSchema, "number": stringSchema],
+                                "properties": ["subject": stringSchema, "number": stringSchema, "crn": stringSchema],
                                 "required": ["subject", "number"],
                             ]],
                         ],
@@ -417,12 +427,36 @@ func courseKey(_ arguments: [String: Any]) throws -> CourseKey {
 }
 
 func courseList(_ raw: Any?) -> [CourseKey] {
+    courseEntries(raw).map(\.key)
+}
+
+/// One course row. `crn` is set only when the caller picked a section.
+struct ReorganizeCourse: Hashable {
+    var key: CourseKey
+    var crn: String?
+}
+
+/// A pinned row is (subject, number, CRN). An unpinned row is (subject, number)
+/// and shares that identity with other unpinned rows of the same number.
+struct ReorganizeSlot: Hashable {
+    var key: CourseKey
+    var crn: String?
+
+    init(_ course: ReorganizeCourse) {
+        key = course.key
+        crn = course.crn
+    }
+}
+
+func courseEntries(_ raw: Any?) -> [ReorganizeCourse] {
     guard let rows = raw as? [[String: Any]] else { return [] }
     return rows.compactMap { row in
         guard let subject = stringArg(row, "subject")?.uppercased(),
               let number = stringArg(row, "number")?.uppercased(),
               !subject.isEmpty, !number.isEmpty else { return nil }
-        return CourseKey(subject: subject, number: number)
+        let crn = stringArg(row, "crn")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pin = (crn?.isEmpty == false) ? crn : nil
+        return ReorganizeCourse(key: CourseKey(subject: subject, number: number), crn: pin)
     }
 }
 
@@ -434,7 +468,7 @@ func stringList(_ raw: Any?) -> [String] {
 
 struct ReorganizeTerm {
     var term: String
-    var courses: [CourseKey]
+    var courses: [ReorganizeCourse]
 }
 
 func planTerms(_ raw: Any?, library: CatalogLibrary) throws -> [ReorganizeTerm] {
@@ -449,21 +483,27 @@ func planTerms(_ raw: Any?, library: CatalogLibrary) throws -> [ReorganizeTerm] 
         guard library.index(for: code) != nil else {
             throw MCPToolError(code: "catalog_unavailable", message: "The bundled catalog for \(code) is not available.")
         }
-        return ReorganizeTerm(term: code, courses: courseList(row["courses"]))
+        return ReorganizeTerm(term: code, courses: courseEntries(row["courses"]))
     }
 }
 
-/// A course moves only into a term the plan already has. The target term must
-/// offer at least one section. Prerequisites that are also in the plan must stay
-/// in a strictly earlier term. Courses outside the plan do not constrain order.
-/// Corequisites are ignored. Empty terms stay. No semester is added.
+/// A course moves only into a term the plan already has. An unpinned course is
+/// offered when the term has any section of its subject and number. A pinned
+/// course is offered only when that CRN is a section of it in that term.
+/// Prerequisites that are also in the plan must stay in a strictly earlier term.
+/// Courses outside the plan do not constrain order. Corequisites are ignored.
+/// Empty terms stay. No semester is added. Two pins with different CRNs stay
+/// separate. Two unpinned rows of the same number collapse to the first one.
 func reorganize(_ input: [ReorganizeTerm], library: CatalogLibrary) -> [String: Any] {
-    var placement: [CourseKey: String] = [:]
-    var order: [CourseKey] = []
+    var placement: [ReorganizeSlot: String] = [:]
+    var order: [ReorganizeSlot] = []
     for term in input {
-        for key in term.courses where placement[key] == nil {
-            placement[key] = term.term
-            order.append(key)
+        for course in term.courses {
+            let slot = ReorganizeSlot(course)
+            if placement[slot] == nil {
+                placement[slot] = term.term
+                order.append(slot)
+            }
         }
     }
     let original = placement
@@ -475,16 +515,16 @@ func reorganize(_ input: [ReorganizeTerm], library: CatalogLibrary) -> [String: 
 
     for _ in 0..<16 {
         var moved = false
-        for key in order {
-            let current = placement[key] ?? ""
-            if termOffers(key, term: current, library: library) { continue }
+        for slot in order {
+            let current = placement[slot] ?? ""
+            if termOffers(slot, term: current, library: library) { continue }
             let candidates = termCodes
-                .filter { $0 != current && termOffers(key, term: $0, library: library) }
+                .filter { $0 != current && termOffers(slot, term: $0, library: library) }
                 .sorted()
             for candidate in candidates {
                 var trial = placement
-                trial[key] = candidate
-                if moveKeepsOrder(key, placement: trial, library: library) {
+                trial[slot] = candidate
+                if moveKeepsOrder(slot, placement: trial, library: library) {
                     placement = trial
                     moved = true
                     break
@@ -496,35 +536,43 @@ func reorganize(_ input: [ReorganizeTerm], library: CatalogLibrary) -> [String: 
 
     var moves: [[String: Any]] = []
     var unresolved: [[String: Any]] = []
-    for key in order {
-        let from = original[key] ?? ""
-        let to = placement[key] ?? from
+    for slot in order {
+        let from = original[slot] ?? ""
+        let to = placement[slot] ?? from
         if from != to {
-            moves.append([
-                "subject": key.subject,
-                "number": key.number,
+            var move: [String: Any] = [
+                "subject": slot.key.subject,
+                "number": slot.key.number,
                 "from_term": from,
                 "to_term": to,
                 "reason": "Not offered in \(from). \(to) offers it, and prerequisites that are in this plan stay in an earlier term.",
-            ])
-        } else if !termOffers(key, term: to, library: library) {
-            let offeredSomewhere = termCodes.contains { termOffers(key, term: $0, library: library) }
+            ]
+            if let crn = slot.crn { move["crn"] = crn }
+            moves.append(move)
+        } else if !termOffers(slot, term: to, library: library) {
+            let offeredSomewhere = termCodes.contains { termOffers(slot, term: $0, library: library) }
             let reason = offeredSomewhere
-                ? "Moving \(key.description) would put it ahead of a prerequisite that is also in this plan."
-                : "No term already in this plan offers \(key.description)."
-            unresolved.append(["subject": key.subject, "number": key.number, "reason": reason])
+                ? "Moving \(slot.key.description) would put it ahead of a prerequisite that is also in this plan."
+                : "No term already in this plan offers \(slot.key.description)."
+            var row: [String: Any] = ["subject": slot.key.subject, "number": slot.key.number, "reason": reason]
+            if let crn = slot.crn { row["crn"] = crn }
+            unresolved.append(row)
         }
     }
 
-    var coursesByTerm: [String: [CourseKey]] = [:]
-    for key in order {
-        coursesByTerm[placement[key] ?? "", default: []].append(key)
+    var coursesByTerm: [String: [ReorganizeSlot]] = [:]
+    for slot in order {
+        coursesByTerm[placement[slot] ?? "", default: []].append(slot)
     }
     var emitted = Set<String>()
     let terms: [[String: Any]] = input.map { term in
         let courses: [[String: Any]]
         if emitted.insert(term.term).inserted {
-            courses = (coursesByTerm[term.term] ?? []).map { ["subject": $0.subject, "number": $0.number] }
+            courses = (coursesByTerm[term.term] ?? []).map { slot in
+                var row: [String: Any] = ["subject": slot.key.subject, "number": slot.key.number]
+                if let crn = slot.crn { row["crn"] = crn }
+                return row
+            }
         } else {
             courses = []
         }
@@ -533,9 +581,12 @@ func reorganize(_ input: [ReorganizeTerm], library: CatalogLibrary) -> [String: 
     return ["moves": moves, "unresolved": unresolved, "plan": ["terms": terms]]
 }
 
-func termOffers(_ key: CourseKey, term: String, library: CatalogLibrary) -> Bool {
+func termOffers(_ slot: ReorganizeSlot, term: String, library: CatalogLibrary) -> Bool {
     guard let index = library.index(for: term) else { return false }
-    return !index.sections(for: key).isEmpty
+    if let crn = slot.crn {
+        return index.section(crn: crn)?.courseKey == slot.key
+    }
+    return !index.sections(for: slot.key).isEmpty
 }
 
 func bundledPrerequisite(_ key: CourseKey, library: CatalogLibrary) -> Requisite? {
@@ -547,24 +598,30 @@ func bundledPrerequisite(_ key: CourseKey, library: CatalogLibrary) -> Requisite
 }
 
 /// `moved` keeps its own prerequisites in an earlier term, and every other course
-/// in the plan that depends on it still has that prerequisite earlier.
-func moveKeepsOrder(_ moved: CourseKey, placement: [CourseKey: String], library: CatalogLibrary) -> Bool {
-    if let requisite = bundledPrerequisite(moved, library: library),
+/// in the plan that depends on it still has that prerequisite earlier. When the
+/// same subject and number is pinned to more than one CRN, the earliest of those
+/// terms is the one a later course can rely on.
+func moveKeepsOrder(_ moved: ReorganizeSlot, placement: [ReorganizeSlot: String], library: CatalogLibrary) -> Bool {
+    if let requisite = bundledPrerequisite(moved.key, library: library),
        !prerequisiteHolds(requisite, courseTerm: placement[moved] ?? "", placement: placement) {
         return false
     }
-    for (other, term) in placement where other != moved {
-        guard let requisite = bundledPrerequisite(other, library: library),
-              requisiteReferences(requisite, moved) else { continue }
+    for (other, term) in placement where other.key != moved.key {
+        guard let requisite = bundledPrerequisite(other.key, library: library),
+              requisiteReferences(requisite, moved.key) else { continue }
         if !prerequisiteHolds(requisite, courseTerm: term, placement: placement) { return false }
     }
     return true
 }
 
-func prerequisiteHolds(_ requisite: Requisite, courseTerm: String, placement: [CourseKey: String]) -> Bool {
+func earliestTerm(_ key: CourseKey, placement: [ReorganizeSlot: String]) -> String? {
+    placement.compactMap { slot, term in slot.key == key ? term : nil }.min()
+}
+
+func prerequisiteHolds(_ requisite: Requisite, courseTerm: String, placement: [ReorganizeSlot: String]) -> Bool {
     switch requisite {
     case .course(let key):
-        guard let earlier = placement[key] else { return true }
+        guard let earlier = earliestTerm(key, placement: placement) else { return true }
         return earlier < courseTerm
     case .test:
         return true

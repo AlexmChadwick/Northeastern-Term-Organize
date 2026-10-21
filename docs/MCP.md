@@ -20,8 +20,8 @@ Build and client snippets are in the README section [Local MCP server](../README
 - Errors: a tool result with isError:true and structuredContent {"error":{"code":C,"message":M}}, where C is one of: invalid_argument, not_found, revision_conflict, confirm_required, read_only, storage_error, unknown_tool. The message is never empty. A write tool called with --read-only on returns read_only, not unknown_tool. Write tools stay hidden from tools/list.
 - Instructors in get_course: [{"name":..., "email":... (optional)}]. The email is present only when its domain is EXACTLY northeastern.edu or neu.edu, compared case-insensitively. Subdomains are not allowed (husky.neu.edu, ccs.neu.edu, mail.neu.edu are all dropped).
 - create_plan {name, terms?: ["202710","202730"]}, a list of term strings.
-- reorganize_plan accepts either {plan_id} or {plan:{terms:[{term, courses:[{subject, number}]}]}}. It returns {moves:[{subject, number, from_term, to_term, reason}], unresolved:[{subject, number, reason}], plan:{...}}.
-- Reorganize rule, the same everywhere: a course moves only into a term the plan already has. The target term's bundled catalog must offer the course, prerequisite order within the plan must be kept, and it never adds a semester. A course is offered in a term when the bundled catalog for that term has at least one section of it.
+- reorganize_plan accepts either {plan_id} or {plan:{terms:[{term, courses:[{subject, number, crn?}]}]}}. It returns {moves:[{subject, number, crn?, from_term, to_term, reason}], unresolved:[{subject, number, crn?, reason}], plan:{...}}.
+- Reorganize rule, the same everywhere: a course moves only into a term the plan already has. The target term's bundled catalog must offer the course, prerequisite order within the plan must be kept, and it never adds a semester. An unpinned course is offered in a term when that term has at least one section of its subject and number. A course with a crn is offered only when that CRN is a section of it in that term. Two rows with different CRNs are different sections, even when they share a subject and number. Two unpinned rows of the same number collapse to the first.
 - Shared fixture: tests/fixtures/mcp-reorganize-fixture.json. It is a plan with CS 4805, CS 2535, CS 2700, CS 4130 and CS 2701 in Fall 2026, plus an empty Spring 2027. Each server must have a test that checks its output against the expected moves. Work out the expected result from the bundled 202730 catalog and the prereqs, and write it into the fixture. Include in your report the per-course reasoning: offered in 202730 yes/no, and prereq status.
 - Storage failures: if the plan file exists but can't be read (permission denied, sandbox, malformed JSON, unknown newer version), every plan tool returns storage_error with the path and reason. NEVER treat a read failure as an empty plan list, and NEVER write over a file you couldn't read. A missing file is the only case that counts as empty.
 
@@ -210,7 +210,7 @@ Required: `term`, `crns` (array of strings).
 
 ### `suggest_schedule`
 
-Required: `term`, `courses` (`[{ "subject", "number" }]`). Optional `constraints`:
+Required: `term`, `courses` (`[{ "subject", "number", "crn"? }]`). Optional `constraints`:
 
 | Field | Notes |
 | --- | --- |
@@ -220,6 +220,10 @@ Required: `term`, `courses` (`[{ "subject", "number" }]`). Optional `constraints
 
 Returns up to 8 conflict-free combinations, best score first. A course with no
 sections in that term returns `not_found` (it has no sections in that bundled term).
+When a course includes `crn`, every combination uses that section. The tool does
+not replace it with another section of the same subject and number, even when the
+pin conflicts or fails a constraint. A `crn` that is not a section of that course
+in the term returns `not_found`.
 
 ```json
 {
@@ -251,12 +255,16 @@ Does not save. Pass either `plan_id` or:
 }
 ```
 
-A course moves only into a term the plan already has, and only when that term's
-bundled catalog has at least one section of it. Prerequisites that are also in the
-plan must sit in a strictly earlier term (`202710` before `202730`). A prerequisite
-that is not in the plan does not block the move. Tests do not block the move.
-Corequisites are ignored. The tool does not add a semester, and it does not drop an
-empty term. This is separate from the app's degree-plan reorganize.
+A course moves only into a term the plan already has. An unpinned course moves
+only when that term's bundled catalog has at least one section of its subject and
+number. A course with `crn` moves only when that CRN is a section of it in the
+target term. Another section of the same number does not count. Two such pins are
+not collapsed into one row. Prerequisites that are also in the plan must sit in a
+strictly earlier term (`202710` before `202730`). A prerequisite that is not in
+the plan does not block the move. Tests do not block the move. Corequisites are
+ignored. The tool does not add a semester, and it does not drop an empty term.
+This is separate from the app's degree-plan reorganize. The returned course
+object includes `crn` when the input had one.
 
 ```json
 {
@@ -385,9 +393,11 @@ The course must already be in that term. Replaces any CRN previously chosen for 
 ### `apply_reorganize`
 
 Required: `plan_id`, `expected_revision`. Destructive. Runs `reorganize_plan` on the
-saved courses and writes the result. Chosen CRNs are kept when they still belong to
-a course that remains in that term. The response is the `get_plan` object plus
-`moves` and `unresolved` from `reorganize_plan`.
+saved courses and writes the result. A chosen CRN is kept when `section(crn:)` in
+that term is a course that remains there. It is not replaced with a different
+section of the same subject and number. `set_section` is the tool that changes a
+pin. The response is the `get_plan` object plus `moves` and `unresolved` from
+`reorganize_plan`.
 
 ### `delete_plan`
 

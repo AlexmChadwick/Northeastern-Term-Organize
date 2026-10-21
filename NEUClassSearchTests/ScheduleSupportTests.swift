@@ -489,7 +489,7 @@ struct SchedulePlanActionsTests {
     @Test func removingOneTopicLeavesItsSibling() {
         let (userData, url) = store()
         defer { try? FileManager.default.removeItem(at: url) }
-        let key = CourseKey(subject: "CS", number: "4973")!
+        let key = CourseKey(subject: "CS", number: "4973")
         let plan = userData.createPlan(name: "Topics", termCode: "202710")
         userData.includeCourse(key, crn: "11111", toPlan: plan.id)
         userData.includeCourse(key, crn: "22222", toPlan: plan.id)
@@ -515,7 +515,7 @@ struct SchedulePlanActionsTests {
             name: "Draft", basedOn: nil, schedulePlans: [schedule], catalogIndex: { _ in nil }
         )
         let copied = draft.terms.flatMap(\.courses)
-        #expect(copied.map(\.crn).sorted() == ["11111", "22222"])
+        #expect(copied.compactMap(\.crn).sorted() == ["11111", "22222"])
         #expect(copied.allSatisfy { $0.key == key })
 
         schedule.courses = [

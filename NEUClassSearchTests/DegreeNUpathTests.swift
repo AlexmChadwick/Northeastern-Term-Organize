@@ -80,6 +80,31 @@ struct DegreeNUpathTests {
 
     // MARK: NUpath
 
+    /// Writing-intensive needs two courses. Two sections of CS 4973 with different CRNs
+    /// are two courses; the same title with no CRN is one.
+    @Test func twoSectionsOfOneNumberCountAsTwoNUpathCourses() throws {
+        let requirements = try Self.requirements()
+        var separate = DegreePlan(name: "Seminars")
+        separate.completed = [
+            DegreePlanCourse(key: CourseKey(string: "CS 4973"), title: "Seminar", credits: 4, crn: "11111"),
+            DegreePlanCourse(key: CourseKey(string: "CS 4973"), title: "Seminar", credits: 4, crn: "22222"),
+        ]
+        let both = DegreeAudit.run(plan: separate, requirements: requirements, attributes: Self.attributes(["CS 4973": [.wi]]))
+        let writing = try #require(Self.item(Self.nupath(both), .wi))
+        #expect(writing.status == .complete)
+        #expect(writing.courses.sorted() == ["CS 4973", "CS 4973 (2)"])
+
+        var plain = DegreePlan(name: "Seminars")
+        plain.completed = [
+            DegreePlanCourse(key: CourseKey(string: "CS 4973"), title: "Seminar", credits: 4),
+            DegreePlanCourse(key: CourseKey(string: "CS 4973"), title: "Seminar", credits: 4),
+        ]
+        let once = DegreeAudit.run(plan: plain, requirements: requirements, attributes: Self.attributes(["CS 4973": [.wi]]))
+        let short = try #require(Self.item(Self.nupath(once), .wi))
+        #expect(short.courses == ["CS 4973"])
+        #expect(short.status == .partial)
+    }
+
     @Test func everyNUpathRequirementIsChecked() throws {
         let audit = DegreeAudit.run(plan: Self.plan(), requirements: try Self.requirements(), attributes: Self.attributes())
         let check = try #require(Self.nupath(audit))

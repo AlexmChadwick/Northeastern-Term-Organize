@@ -70,7 +70,26 @@ struct PlanCourse: Codable, Hashable, Identifiable, Sendable {
     var excludedCRNs: Set<String> = []
     /// Index into `CourseColor.palette`.
     var colorIndex: Int
-    var id: CourseKey { key }
+    /// The section the user chose for this row. Two rows may share a subject and
+    /// number only when each has one of these and the CRNs differ (special topics).
+    /// Nil on plans saved before the choice lived on the row; `selectedCRNs` still
+    /// holds it then. Optional so those plans still decode.
+    var pinnedCRN: String? = nil
+    /// `CS 4973`, or `CS 4973|11111` once a CRN is chosen, so two topics are two rows.
+    var id: String {
+        if let pinnedCRN, !pinnedCRN.isEmpty { return "\(key.description)|\(pinnedCRN)" }
+        return key.description
+    }
+}
+
+/// What `SchedulePlan.include` did with a course.
+enum PlanCourseAdmission: Equatable, Sendable {
+    /// A new row was appended.
+    case added
+    /// An existing row that had no pin now has this CRN. No second row was added.
+    case pinnedExisting
+    /// The course was already there, or this exact CRN was already pinned.
+    case alreadyPresent
 }
 
 /// A named schedule for one term (SearchNEU calls these "plans").
@@ -79,8 +98,9 @@ struct SchedulePlan: Codable, Hashable, Identifiable, Sendable {
     var name: String
     var termCode: String
     var courses: [PlanCourse] = []
-    /// The chosen section for each course (one CRN per course, possibly more
-    /// for linked components). This is the schedule shown on the calendar.
+    /// Sections shown on the calendar. A row's own choice is `PlanCourse.pinnedCRN`.
+    /// One course can still contribute more than one CRN when it has a linked
+    /// component (a lecture and its lab).
     var selectedCRNs: [String] = []
     var filters = ScheduleFilters()
     /// "Your ideal week": what the student wants the generated schedules to look like. Nil until they
@@ -96,6 +116,58 @@ struct SchedulePlan: Codable, Hashable, Identifiable, Sendable {
     func contains(_ key: CourseKey) -> Bool { courses.contains { $0.key == key } }
 
     func course(_ key: CourseKey) -> PlanCourse? { courses.first { $0.key == key } }
+
+    func entries(for key: CourseKey) -> [PlanCourse] { courses.filter { $0.key == key } }
+
+    /// Adds `key`, or another row of it.
+    ///
+    /// The first row of a subject and number may omit a CRN. Another row is added
+    /// only when every existing row of that number already has a pinned CRN and
+    /// `crn` is a different one. The same CRN twice is refused. Without a CRN,
+    /// a subject and number that is already in the plan is left as it is.
+    ///
+    /// `courseCRNs` is every section CRN of `key` this term. A choice saved only
+    /// in `selectedCRNs` (plans from before `pinnedCRN`) still counts as that
+    /// row's pin, so a second topic can be added beside it.
+    @discardableResult
+    mutating func include(key: CourseKey, crn: String?, courseCRNs: Set<String> = [], required: Bool = true) -> PlanCourseAdmission {
+        let trimmed = crn?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requested: String? = (trimmed?.isEmpty == false) ? trimmed : nil
+        let rows = courses.indices.filter { courses[$0].key == key }
+        if rows.isEmpty {
+            courses.append(PlanCourse(key: key, isRequired: required, colorIndex: nextColorIndex, pinnedCRN: requested))
+            if let requested, !selectedCRNs.contains(requested) { selectedCRNs.append(requested) }
+            return .added
+        }
+
+        if rows.count == 1, courses[rows[0]].pinnedCRN == nil {
+            let owned = selectedCRNs.filter { courseCRNs.contains($0) }
+            if let requested, owned.contains(requested) {
+                courses[rows[0]].pinnedCRN = requested
+                return .alreadyPresent
+            }
+            if let first = owned.first {
+                courses[rows[0]].pinnedCRN = first
+            }
+        }
+
+        guard let requested else { return .alreadyPresent }
+        if courses.contains(where: { $0.pinnedCRN == requested }) { return .alreadyPresent }
+
+        if let i = rows.first(where: { courses[$0].pinnedCRN == nil }) {
+            courses[i].pinnedCRN = requested
+            if !courseCRNs.isEmpty {
+                let kept = requested
+                selectedCRNs.removeAll { courseCRNs.contains($0) && $0 != kept }
+            }
+            if !selectedCRNs.contains(requested) { selectedCRNs.append(requested) }
+            return .pinnedExisting
+        }
+
+        courses.append(PlanCourse(key: key, isRequired: required, colorIndex: nextColorIndex, pinnedCRN: requested))
+        if !selectedCRNs.contains(requested) { selectedCRNs.append(requested) }
+        return .added
+    }
 
     /// The next unused palette index.
     var nextColorIndex: Int {
@@ -248,13 +320,18 @@ struct DegreePlanCourse: Codable, Hashable, Identifiable, Sendable {
     /// Title as written in the plan (the degree audit uses Banner's 30-character short titles).
     var title: String
     var credits: Double
+    /// The section, when the student chose one. Two rows of one subject and number
+    /// count separately only when each has a CRN and the CRNs differ. Nil on lines
+    /// imported from a degree audit. Optional so plans saved before it existed still decode.
+    var crn: String? = nil
 
-    init(id: UUID = UUID(), key: CourseKey?, label: String? = nil, title: String, credits: Double) {
+    init(id: UUID = UUID(), key: CourseKey?, label: String? = nil, title: String, credits: Double, crn: String? = nil) {
         self.id = id
         self.key = key
         self.label = label ?? key?.description ?? ""
         self.title = title
         self.credits = credits
+        self.crn = crn
     }
 }
 

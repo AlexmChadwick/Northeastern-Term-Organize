@@ -193,26 +193,49 @@ final class UserDataStore {
         plansDidChange()
     }
 
-    /// Adds a course to a plan (no-op if present). Returns false if it was already there.
+    /// Adds a course to a plan. A subject and number that is already there is left
+    /// alone, unless `includeCourse` is given a different CRN for another topic.
+    /// Returns false if it was already there.
     @discardableResult
     func addCourse(_ key: CourseKey, toPlan id: UUID, required: Bool = true) -> Bool {
-        var added = false
-        updatePlan(id: id) { plan in
-            guard !plan.contains(key) else { return }
-            plan.courses.append(PlanCourse(key: key, isRequired: required, colorIndex: plan.nextColorIndex))
-            added = true
-        }
-        return added
+        includeCourse(key, crn: nil, toPlan: id, required: required) == .added
     }
 
-    /// Removes a course and its chosen section. Favorited combinations that used
-    /// the course are dropped too, since they can no longer be applied.
+    /// Adds a course, or another row of the same number when `crn` is a new pin.
+    /// See `SchedulePlan.include`.
+    @discardableResult
+    func includeCourse(
+        _ key: CourseKey, crn: String?, courseCRNs: Set<String> = [], toPlan id: UUID, required: Bool = true
+    ) -> PlanCourseAdmission {
+        var result = PlanCourseAdmission.alreadyPresent
+        updatePlan(id: id) { plan in
+            result = plan.include(key: key, crn: crn, courseCRNs: courseCRNs, required: required)
+        }
+        return result
+    }
+
+    /// Removes every row of a subject and number, and the sections passed in.
+    /// Favorited combinations that used one of those sections are dropped too.
     func removeCourse(_ key: CourseKey, fromPlan id: UUID, sectionsOfCourse: [String] = []) {
         updatePlan(id: id) { plan in
             plan.courses.removeAll { $0.key == key }
             let crns = Set(sectionsOfCourse)
             plan.selectedCRNs.removeAll { crns.contains($0) }
             plan.favoriteCombinations.removeAll { combination in combination.contains { crns.contains($0) } }
+        }
+    }
+
+    /// Removes one row. A sibling topic's pin is kept even if it is one of `sectionsOfCourse`.
+    func removeEntry(_ entryID: String, fromPlan id: UUID, sectionsOfCourse: [String] = []) {
+        updatePlan(id: id) { plan in
+            guard let course = plan.courses.first(where: { $0.id == entryID }) else { return }
+            let siblingPins = Set(plan.courses.filter { $0.id != entryID }.compactMap(\.pinnedCRN))
+            plan.courses.removeAll { $0.id == entryID }
+            var drop = Set(sectionsOfCourse)
+            if let pin = course.pinnedCRN { drop.insert(pin) }
+            drop.subtract(siblingPins)
+            plan.selectedCRNs.removeAll { drop.contains($0) }
+            plan.favoriteCombinations.removeAll { combination in combination.contains { drop.contains($0) } }
         }
     }
 

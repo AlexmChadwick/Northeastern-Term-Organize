@@ -131,6 +131,36 @@ struct ScheduleGeneratorTests {
         #expect(open.schedules.map { Set($0.crns) } == [Set(["22222", "33333"])])
     }
 
+    /// Two rows of CS 4973, each pinned to its own CRN, stay two courses. Generation
+    /// places both, and adopting a schedule does not collapse them to one section.
+    @Test func twoPinnedSpecialTopicsStaySeparate() {
+        let topicA = section("11111", "CS", "4973", days: [1], start: 9, end: 10)
+        let topicB = section("22222", "CS", "4973", days: [3], start: 14, end: 15)
+        let index = topicsIndex(topicA, topicB)
+        let key = CourseKey(subject: "CS", number: "4973")
+        var plan = SchedulePlan(name: "Topics", termCode: "202710")
+        plan.courses = [
+            PlanCourse(key: key, colorIndex: 0, pinnedCRN: "11111"),
+            PlanCourse(key: key, colorIndex: 1, pinnedCRN: "22222"),
+        ]
+        plan.selectedCRNs = ["11111", "22222"]
+
+        let inputs = ScheduleCourseInput.inputs(for: plan, index: index)
+        #expect(inputs.map { $0.sections.map(\.crn) } == [["11111"], ["22222"]])
+
+        let generated = ScheduleGenerator.generate(courses: inputs, filters: ScheduleFilters())
+        #expect(generated.schedules.map { Set($0.crns) } == [Set(["11111", "22222"])])
+
+        let resolved = ResolvedPlan(plan: plan, index: index)
+        #expect(resolved.entries.map(\.chosen?.crn) == ["11111", "22222"])
+        #expect(resolved.credits.min == 8)
+        #expect(resolved.credits.max == 8)
+
+        PlanEditing.adoptGeneratedSchedule(["22222"], into: &plan, index: index)
+        #expect(plan.courses.map(\.pinnedCRN) == ["11111", "22222"])
+        #expect(Set(plan.selectedCRNs) == ["11111", "22222"])
+    }
+
     private func topicsIndex(_ sections: CourseSection...) -> CatalogIndex {
         let courses = [
             Course(subject: "CS", number: "4973", title: "Special Topics", description: "", minCredits: 4, maxCredits: 4,

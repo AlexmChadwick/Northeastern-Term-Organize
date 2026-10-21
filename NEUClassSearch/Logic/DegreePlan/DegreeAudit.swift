@@ -23,8 +23,9 @@ import Foundation
 /// can use another one. Finally, if a requirement is still short although the plan has courses
 /// that could meet it, every way of matching courses to requirements is searched for one that
 /// meets more of them, so the plan is never shown short of a requirement it can meet. A topics
-/// course taken again on another topic counts each time; a repeated course counts once. This is
-/// a planning aid; the official audit is the registrar's.
+/// course taken again on another topic counts each time, and so do two rows that each name a
+/// different CRN. A repeated course counts once. This is a planning aid; the official audit
+/// is the registrar's.
 ///
 /// Courses that count as one another (`CourseEquivalences`: a renumbered course and its
 /// replacement, whichever department) are interchangeable here: a requirement naming CS 2100 is
@@ -54,9 +55,12 @@ struct DegreeAudit: Sendable {
         /// The course the requirement names, when this one counts as it because they are
         /// equivalent (CS 2510 counting as CS 2100). Nil when it counts as itself.
         var satisfies: CourseKey?
-        /// 0 the first time a course is in the plan; 1, 2… for a topics course taken again on
-        /// another topic, which counts on its own.
+        /// 0 the first time a course is in the plan; 1, 2… for another section of the same
+        /// number that counts on its own (a different topic, or a different CRN).
         var instance = 0
+        /// The section, when the plan row names one. Two rows count separately when
+        /// both have a CRN and the CRNs differ.
+        var crn: String? = nil
 
         /// `CS 4973`, or `CS 4973 (2)` for the second time a topics course is taken.
         var id: String { instance == 0 ? key.description : "\(key.description) (\(instance + 1))" }
@@ -371,7 +375,7 @@ private struct AuditEngine {
         func offer(_ course: DegreePlanCourse, semester: String?) {
             defer { order += 1 }
             guard let key = course.key else { return }
-            var use = CourseUse(key: key, title: course.title, credits: course.credits, semester: semester, order: order)
+            var use = CourseUse(key: key, title: course.title, credits: course.credits, semester: semester, order: order, crn: course.crn)
             let earlier = instances[key, default: []].compactMap { pool[$0] }
             if let repeated = earlier.first(where: { !Self.countsSeparately(use, $0) }) {
                 // The same class again: keep the better listing. Completed beats planned; then
@@ -395,7 +399,9 @@ private struct AuditEngine {
     }
 
     static func countsSeparately(_ a: CourseUse, _ b: CourseUse) -> Bool {
-        DegreeCourseRepeats.countsSeparately(title: a.title, credits: a.credits, from: b.title, credits: b.credits)
+        DegreeCourseRepeats.countsSeparately(
+            title: a.title, credits: a.credits, crn: a.crn, from: b.title, credits: b.credits, otherCRN: b.crn
+        )
     }
 
     mutating func run() -> DegreeAudit {
@@ -1185,18 +1191,29 @@ private struct AuditEngine {
 
 /// When a course is in a plan more than once, whether the listings are different courses.
 enum DegreeCourseRepeats {
-    /// Whether another listing of a course counts as a course of its own: a topics course taken
-    /// on another topic (the titles differ, or it's a topics course), not a repeat of the same
-    /// class. Lines without credit never do.
-    static func countsSeparately(title: String, credits: Double, from otherTitle: String, credits otherCredits: Double) -> Bool {
+    /// Whether another listing of a course counts as a course of its own.
+    ///
+    /// When either listing names a CRN, both must name one and the CRNs must differ
+    /// (two special-topics sections). The same CRN twice is one course. When neither
+    /// names a CRN, a different title counts on its own, and so does a topics course
+    /// (the title contains "topic"), which is how plans imported without CRNs still
+    /// count each topic. Lines without credit never count separately.
+    static func countsSeparately(
+        title: String, credits: Double, crn: String? = nil,
+        from otherTitle: String, credits otherCredits: Double, otherCRN: String? = nil
+    ) -> Bool {
         guard credits > 0, otherCredits > 0 else { return false }
+        if crn != nil || otherCRN != nil {
+            guard let crn, let otherCRN else { return false }
+            return crn != otherCRN
+        }
         let first = normalizedTitle(title), second = normalizedTitle(otherTitle)
         if !first.isEmpty, !second.isEmpty, first != second { return true }
         return first.contains("topic") || second.contains("topic")
     }
 
     static func countsSeparately(_ a: DegreePlanCourse, _ b: DegreePlanCourse) -> Bool {
-        countsSeparately(title: a.title, credits: a.credits, from: b.title, credits: b.credits)
+        countsSeparately(title: a.title, credits: a.credits, crn: a.crn, from: b.title, credits: b.credits, otherCRN: b.crn)
     }
 
     /// Lowercased letters and digits, with "&" as "and": `Algorithms & Data` matches

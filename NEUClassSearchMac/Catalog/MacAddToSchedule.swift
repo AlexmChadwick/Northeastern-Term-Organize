@@ -32,7 +32,7 @@ enum MacCatalogScheduleAdding {
     static func holds(_ plan: SchedulePlan, _ addition: MacCatalogScheduleAddition) -> Bool {
         guard plan.contains(addition.key) else { return false }
         guard let crn = addition.crn else { return true }
-        return plan.selectedCRNs.contains(crn)
+        return plan.courses.contains { $0.pinnedCRN == crn } || plan.selectedCRNs.contains(crn)
     }
 
     /// Adds the courses to the plan (and picks the sections asked for). Returns the courses that
@@ -49,12 +49,10 @@ enum MacCatalogScheduleAdding {
         let index = catalog.cachedIndex(for: termCode)
         for addition in additions {
             let wasThere = userData.plan(id: planID).map { holds($0, addition) } ?? false
-            userData.addCourse(addition.key, toPlan: planID)
-            if let crn = addition.crn {
-                let courseCRNs = Set(index?.sections(for: addition.key).map(\.crn) ?? []).union([crn])
-                userData.updatePlan(id: planID) { PlanEditing.setSection(crn, courseCRNs: courseCRNs, in: &$0) }
-            }
-            if !wasThere { changed.append(addition) }
+            let courseCRNs = Set(index?.sections(for: addition.key).map(\.crn) ?? [])
+                .union(addition.crn.map { [$0] } ?? [])
+            let admission = userData.includeCourse(addition.key, crn: addition.crn, courseCRNs: courseCRNs, toPlan: planID)
+            if !wasThere || admission == .added { changed.append(addition) }
         }
         return changed
     }

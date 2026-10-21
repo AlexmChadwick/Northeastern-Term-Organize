@@ -344,6 +344,7 @@ struct ScheduleGeneratorView: View {
             var key: CourseKey
             var isRequired: Bool
             var excluded: [String]
+            var pinnedCRN: String?
         }
 
         var termCode: String
@@ -362,7 +363,7 @@ struct ScheduleGeneratorView: View {
         guard let plan, index != nil else { return nil }
         return GenerationKey(
             termCode: plan.termCode,
-            courses: plan.courses.map { .init(key: $0.key, isRequired: $0.isRequired, excluded: $0.excludedCRNs.sorted()) },
+            courses: plan.courses.map { .init(key: $0.key, isRequired: $0.isRequired, excluded: $0.excludedCRNs.sorted(), pinnedCRN: $0.pinnedCRN) },
             pinnedCRNs: plan.selectedCRNs.sorted(),
             filters: plan.filters,
             preferences: plan.preferences ?? SchedulePreferences(),

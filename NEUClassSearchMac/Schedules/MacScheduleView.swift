@@ -52,7 +52,7 @@ private struct MacScheduleScreen: View {
     @State private var loadedIndex: CatalogIndex?
     @State private var indexLoadFinished = false
     @State private var mode: MacScheduleView.Mode
-    @State private var selection: Set<CourseKey> = []
+    @State private var selection: Set<String> = []
     @State private var sheet: Sheet?
     @State private var showsAddCourse = false
     @State private var showsFilters = false
@@ -82,13 +82,13 @@ private struct MacScheduleScreen: View {
     }
 
     private enum Sheet: Identifiable {
-        case sectionPicker(CourseKey)
+        case sectionPicker(CourseKey, String?)
         case preferences
         case export
 
         var id: String {
             switch self {
-            case .sectionPicker(let key): "picker-\(key)"
+            case .sectionPicker(let key, let entryID): "picker-\(entryID ?? key.description)"
             case .preferences: "preferences"
             case .export: "export"
             }
@@ -214,7 +214,7 @@ private struct MacScheduleScreen: View {
 
     private func calendarPane(plan: SchedulePlan, resolved: ResolvedPlan) -> some View {
         let preferences = userData.preferences
-        let selectedTitles = Set(selection.map(\.description))
+        let selectedTitles = Set(resolved.entries.filter { selection.contains($0.id) }.map(\.key.description))
         return MacWeekCalendar(
             events: resolved.events,
             days: MacCalendarRange.days(for: resolved.events, showWeekends: preferences.showWeekends),
@@ -224,11 +224,11 @@ private struct MacScheduleScreen: View {
                 event.payload.flatMap { resolved.entry(forCRN: $0)?.section }.map(MacCalendarBlockExtras.init(section:)) ?? MacCalendarBlockExtras()
             },
             popover: { event in
-                AnyView(MacSectionDetailsView(planID: planID, crn: event.payload ?? "", undoManager: undoManager) { key in
+                AnyView(MacSectionDetailsView(planID: planID, crn: event.payload ?? "", undoManager: undoManager) { key, entryID in
                     // Let the popover go before the sheet comes.
                     Task {
                         try? await Task.sleep(for: .milliseconds(200))
-                        sheet = .sectionPicker(key)
+                        sheet = .sectionPicker(key, entryID)
                     }
                 })
             },
@@ -264,12 +264,12 @@ private struct MacScheduleScreen: View {
     @ViewBuilder
     private func blockMenu(_ event: CalendarEvent, plan: SchedulePlan, resolved: ResolvedPlan) -> some View {
         if let crn = event.payload, let found = resolved.entry(forCRN: crn) {
-            Button("Change Section…", systemImage: "arrow.left.arrow.right") { sheet = .sectionPicker(found.entry.key) }
+            Button("Change Section…", systemImage: "arrow.left.arrow.right") { sheet = .sectionPicker(found.entry.key, found.entry.id) }
             Button("Open Course in New Window", systemImage: "macwindow") { openCourse(found.entry.key, plan: plan) }
             Button("Copy CRN", systemImage: "doc.on.doc") { MacPasteboard.copy(crn) }
             Divider()
             Button("Remove Section", systemImage: "minus.circle", role: .destructive) {
-                editor.perform("Remove Section") { PlanEditing.setSection(nil, courseCRNs: found.entry.courseCRNs.union([crn]), in: &$0) }
+                editor.perform("Remove Section") { PlanEditing.setSection(nil, courseCRNs: found.entry.courseCRNs.union([crn]), entryID: found.entry.id, in: &$0) }
             }
         }
     }
@@ -356,8 +356,8 @@ private struct MacScheduleScreen: View {
     @ViewBuilder
     private func sheetContent(_ sheet: Sheet, plan: SchedulePlan, index: CatalogIndex?) -> some View {
         switch sheet {
-        case .sectionPicker(let key):
-            MacSectionPickerSheet(planID: planID, courseKey: key, undoManager: undoManager)
+        case .sectionPicker(let key, let entryID):
+            MacSectionPickerSheet(planID: planID, courseKey: key, entryID: entryID, undoManager: undoManager)
         case .preferences:
             MacSchedulePreferencesSheet(
                 planID: planID,
@@ -374,13 +374,15 @@ private struct MacScheduleScreen: View {
 
     private func listActions(plan: SchedulePlan, resolved: ResolvedPlan, index: CatalogIndex?) -> MacCourseListActions {
         MacCourseListActions(
-            chooseSection: { key in sheet = .sectionPicker(key) },
-            openCourse: { key in openCourse(key, plan: plan) },
-            toggleRequired: { key in
-                let required = !(plan.course(key)?.isRequired ?? true)
-                editor.perform(required ? "Make Required" : "Make Optional") { PlanEditing.setRequired(required, for: key, in: &$0) }
+            chooseSection: { entryID in
+                if let entry = resolved.entry(id: entryID) { sheet = .sectionPicker(entry.key, entryID) }
             },
-            remove: { keys in removeCourses(keys, plan: plan) },
+            openCourse: { key in openCourse(key, plan: plan) },
+            toggleRequired: { entryID in
+                let required = !(resolved.entry(id: entryID)?.planCourse.isRequired ?? true)
+                editor.perform(required ? "Make Required" : "Make Optional") { PlanEditing.setRequired(required, entryID: entryID, in: &$0) }
+            },
+            remove: { ids in removeCourses(ids, plan: plan) },
             addCourse: { showsAddCourse = true },
             fix: { fix in
                 switch fix {
@@ -407,18 +409,18 @@ private struct MacScheduleScreen: View {
 
     /// Removes courses (with their chosen sections and favorite combinations). ⌘Z, or "Undo" in the
     /// toast, puts them back at their old positions.
-    private func removeCourses(_ keys: [CourseKey], plan: SchedulePlan) {
+    private func removeCourses(_ ids: [String], plan: SchedulePlan) {
         let index = catalog.planIndex(for: plan.termCode, fallback: loadedIndex)
         let resolved = ResolvedPlan(plan: userData.plan(id: planID) ?? plan, index: index)
         var removals: [PlanCourseRemoval] = []
-        editor.record(keys.count == 1 ? "Remove Course" : "Remove Courses") {
-            for key in keys {
-                guard let entry = resolved.entry(for: key), let current = userData.plan(id: planID) else { continue }
+        editor.record(ids.count == 1 ? "Remove Course" : "Remove Courses") {
+            for id in ids {
+                guard let entry = resolved.entry(id: id), let current = userData.plan(id: planID) else { continue }
                 removals.append(SchedulePlanActions.removeCourse(entry, from: current, index: index, userData: userData))
             }
         }
         guard !removals.isEmpty else { return }
-        selection.subtract(keys)
+        selection.subtract(ids)
         manager.toast = .undoable(
             removals.count == 1 ? "Removed \(removals[0].course.key)" : "Removed \(removals.count) courses",
             systemImage: "trash", undoManager: undoManager
@@ -442,12 +444,15 @@ private struct MacScheduleScreen: View {
             for dropped in ScheduleDroppedCourse.parse(items) {
                 // Text that isn't a course of this term (a professor's name, say) is ignored.
                 if let index, index.course(dropped.key) == nil { continue }
-                if userData.addCourse(dropped.key, toPlan: planID) { added.append(dropped.key) }
+                let courseCRNs = Set(index?.sections(for: dropped.key).map(\.crn) ?? [])
+                let crn: String? = {
+                    guard let requested = dropped.crn else { return nil }
+                    guard let index else { return requested }
+                    return index.section(crn: requested)?.courseKey == dropped.key ? requested : nil
+                }()
+                let admission = userData.includeCourse(dropped.key, crn: crn, courseCRNs: courseCRNs, toPlan: planID)
+                if admission == .added { added.append(dropped.key) }
                 touched = true
-                if let crn = dropped.crn, let section = index?.section(crn: crn), section.courseKey == dropped.key {
-                    let crns = Set(index?.sections(for: dropped.key).map(\.crn) ?? [])
-                    userData.updatePlan(id: planID) { PlanEditing.setSection(crn, courseCRNs: crns, in: &$0) }
-                }
             }
         }
         guard touched else { return false }
@@ -514,13 +519,16 @@ private struct MacScheduleScreen: View {
             hasCourses: !plan.courses.isEmpty,
             canGenerate: !plan.courses.isEmpty && resolved.hasCatalog,
             hasSelection: resolved.hasSelection,
-            selectedCourse: selection.count == 1 ? selection.first : nil,
+            selectedCourse: selection.count == 1 ? resolved.entries.first { $0.id == selection.first }?.key : nil,
             addCourse: { showsAddCourse = true },
             showSchedule: { mode = .courses },
             showGenerator: { mode = .generator },
             showFilters: { showsFilters = true },
             editPreferences: { sheet = .preferences },
-            chooseSection: { key in sheet = .sectionPicker(key) },
+            chooseSection: { key in
+                let entryID = selection.count == 1 ? selection.first : resolved.entry(for: key)?.id
+                sheet = .sectionPicker(key, entryID)
+            },
             copyCRNs: { copyCRNs(resolved) },
             setPrimary: { manager.setPrimary(plan, userData: userData) },
             rename: { manager.startRenaming(plan) },

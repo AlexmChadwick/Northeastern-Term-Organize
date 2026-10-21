@@ -16,7 +16,7 @@ struct MacSectionDetailsView: View {
     var crn: String
     /// The window's undo manager, so removing the section can be undone with ⌘Z.
     var undoManager: UndoManager?
-    var onChangeSection: (CourseKey) -> Void
+    var onChangeSection: (CourseKey, String) -> Void
 
     @Environment(CatalogStore.self) private var catalog
     @Environment(UserDataStore.self) private var userData
@@ -139,7 +139,7 @@ struct MacSectionDetailsView: View {
             HStack(spacing: 8) {
                 Button("Change Section…") {
                     dismiss()
-                    onChangeSection(entry.key)
+                    onChangeSection(entry.key, entry.id)
                 }
                 Button("View Course") {
                     openWindow(id: MacWindowID.course, value: CourseWindowValue(termCode: plan.termCode, key: entry.key))
@@ -147,7 +147,7 @@ struct MacSectionDetailsView: View {
                 Spacer(minLength: 0)
                 Button("Remove", role: .destructive) {
                     MacSchedulePlanEditor(userData: userData, planID: planID, undoManager: undoManager).perform("Remove Section") { plan in
-                        PlanEditing.setSection(nil, courseCRNs: entry.courseCRNs.union([section.crn]), in: &plan)
+                        PlanEditing.setSection(nil, courseCRNs: entry.courseCRNs.union([section.crn]), entryID: entry.id, in: &plan)
                     }
                     dismiss()
                 }

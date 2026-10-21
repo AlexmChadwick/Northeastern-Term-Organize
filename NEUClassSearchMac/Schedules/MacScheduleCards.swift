@@ -258,9 +258,8 @@ private struct MacScheduleCard: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
-                Text(row.plan.name)
+                ScheduleNameLabel(name: row.plan.name, showsIcon: false)
                     .font(.headline)
-                    .lineLimit(1)
                 Spacer(minLength: 4)
                 if row.plan.isPrimary {
                     TagLabel(text: "My Schedule", systemImage: "star.fill", tint: .orange)

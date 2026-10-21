@@ -239,9 +239,8 @@ struct MacSchedulesOverview: View {
                 .frame(width: 18)
                 .accessibilityLabel(row.plan.isPrimary ? "My Schedule" : "Schedule")
             VStack(alignment: .leading, spacing: 1) {
-                Text(row.plan.name)
+                ScheduleNameLabel(name: row.plan.name, showsIcon: false)
                     .fontWeight(.medium)
-                    .lineLimit(1)
                 Text(courseCodes(of: row.plan))
                     .font(.caption)
                     .foregroundStyle(.secondary)

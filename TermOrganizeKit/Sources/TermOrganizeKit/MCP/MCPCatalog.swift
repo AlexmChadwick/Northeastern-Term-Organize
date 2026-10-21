@@ -236,32 +236,49 @@ extension MCPTool {
         },
         MCPTool(
             name: "reorganize_plan",
-            description: "Reorder a whole plan of terms and courses the way the app does when a semester cannot be scheduled: move a course to a later term where the bundled catalogs say it is taught, without breaking prerequisites. Nothing is saved.",
+            description: "Move courses into terms the plan already has, when the bundled catalog for that term offers the course and prerequisites that are also in the plan stay in an earlier term. Does not add a semester and does not save.",
             properties: [
-                "terms": ["type": "array", "items": [
-                    "type": "object",
-                    "properties": [
-                        "term": stringSchema,
-                        "courses": ["type": "array", "items": [
-                            "type": "object",
-                            "properties": ["subject": stringSchema, "number": stringSchema],
-                            "required": ["subject", "number"],
-                        ]],
-                    ],
-                    "required": ["term", "courses"],
+                "plan_id": stringSchema,
+                "plan": ["type": "object", "properties": [
+                    "terms": ["type": "array", "items": [
+                        "type": "object",
+                        "properties": [
+                            "term": stringSchema,
+                            "courses": ["type": "array", "items": [
+                                "type": "object",
+                                "properties": ["subject": stringSchema, "number": stringSchema],
+                                "required": ["subject", "number"],
+                            ]],
+                        ],
+                        "required": ["term", "courses"],
+                    ]],
                 ]],
             ],
-            required: ["terms"],
+            required: [],
             readOnly: true
         ) { arguments, server in
-            try server.requireCatalog()
-            let input = try planTerms(arguments["terms"], library: server.library)
-            return try reorganize(input, library: server.library)
+            try server.reorganizePlan(arguments)
         },
     ]
 }
 
 extension TermOrganizeMCPServer {
+    func reorganizePlan(_ arguments: [String: Any]) throws -> [String: Any] {
+        try requireCatalog()
+        if arguments["plan"] != nil {
+            let plan = arguments["plan"] as? [String: Any] ?? [:]
+            let input = try planTerms(plan["terms"], library: library)
+            return reorganize(input, library: library)
+        }
+        if arguments["plan_id"] != nil {
+            let id = try planID(arguments)
+            let saved = try getPlan(id: id)
+            let input = try planTerms(saved["terms"], library: library)
+            return reorganize(input, library: library)
+        }
+        throw MCPToolError(code: "invalid_argument", message: "reorganize_plan needs plan_id or plan.terms.")
+    }
+
     func requireCatalog() throws {
         if library.indexes.isEmpty {
             throw MCPToolError(code: "catalog_unavailable", message: "The bundled Fall 2026 and Spring 2027 catalogs were not found.")
@@ -403,117 +420,132 @@ func planTerms(_ raw: Any?, library: CatalogLibrary) throws -> [ReorganizeTerm] 
     }
 }
 
-func reorganize(_ input: [ReorganizeTerm], library: CatalogLibrary) throws -> [String: Any] {
-    var plan = DegreePlan(name: "Plan")
-    for item in input {
-        let banner = Term(code: item.term, bannerDescription: "")
-        var semester = DegreePlanTerm(season: PlanSeason(termSeason: banner.season), year: banner.calendarYear)
-        for key in item.courses {
-            let course = library.index(for: item.term)?.course(key)
-            semester.courses.append(DegreePlanCourse(
-                key: key,
-                title: course?.title ?? key.description,
-                credits: course?.maxCredits ?? 4
-            ))
-        }
-        plan.terms.append(semester)
-    }
-    plan.sortTerms()
-    let original = termMap(of: plan, library: library)
-
-    var offered: [CourseKey: Set<String>] = [:]
-    for (code, index) in library.indexes {
-        for course in index.courses where !index.sections(for: course.key).isEmpty {
-            offered[course.key, default: []].insert(code)
+/// A course moves only into a term the plan already has. The target term must
+/// offer at least one section. Prerequisites that are also in the plan must stay
+/// in a strictly earlier term. Courses outside the plan do not constrain order.
+/// Corequisites are ignored. Empty terms stay. No semester is added.
+func reorganize(_ input: [ReorganizeTerm], library: CatalogLibrary) -> [String: Any] {
+    var placement: [CourseKey: String] = [:]
+    var order: [CourseKey] = []
+    for term in input {
+        for key in term.courses where placement[key] == nil {
+            placement[key] = term.term
+            order.append(key)
         }
     }
-    let history = OfferingHistory(checkedTerms: library.indexes.keys.sorted(by: >), offered: offered, checkedKeys: nil)
-    func prerequisites(_ key: CourseKey) -> Requisite?? {
-        for index in library.indexes.values {
-            if let course = index.course(key), course.detailsLoaded { return .some(course.prereqs) }
-        }
-        return nil
+    let original = placement
+    var termCodes: [String] = []
+    var seenTerms = Set<String>()
+    for term in input where seenTerms.insert(term.term).inserted {
+        termCodes.append(term.term)
     }
 
-    var notes: [String] = []
-    for _ in 0..<8 {
-        plan.sortTerms()
-        var applied = false
-        for semester in plan.terms {
-            guard let code = bannerCode(season: semester.season, year: semester.year),
-                  let index = library.index(for: code) else { continue }
-            let blocking = semester.courses.compactMap(\.key).filter { index.sections(for: $0).isEmpty }
-            guard !blocking.isEmpty else { continue }
-            let suggestions = DegreePlanReordering.suggestions(
-                for: plan,
-                termID: semester.id,
-                blocking: blocking,
-                history: history,
-                prerequisites: prerequisites,
-                equivalences: .none
-            )
-            guard let best = suggestions.first else {
-                notes.append("\(listKeys(blocking)) cannot move out of \(code) with the bundled catalogs.")
-                continue
+    for _ in 0..<16 {
+        var moved = false
+        for key in order {
+            let current = placement[key] ?? ""
+            if termOffers(key, term: current, library: library) { continue }
+            let candidates = termCodes
+                .filter { $0 != current && termOffers(key, term: $0, library: library) }
+                .sorted()
+            for candidate in candidates {
+                var trial = placement
+                trial[key] = candidate
+                if moveKeepsOrder(key, placement: trial, library: library) {
+                    placement = trial
+                    moved = true
+                    break
+                }
             }
-            DegreePlanReordering.apply(best, to: &plan)
-            notes.append(best.title)
-            applied = true
-            break
         }
-        if !applied { break }
+        if !moved { break }
     }
 
-    let updated = termMap(of: plan, library: library)
     var moves: [[String: Any]] = []
-    let courses = Set(original.keys).union(updated.keys)
-    for key in courses.sorted(by: { $0.description < $1.description }) {
+    var unresolved: [[String: Any]] = []
+    for key in order {
         let from = original[key] ?? ""
-        let to = updated[key] ?? ""
+        let to = placement[key] ?? from
         if from != to {
-            moves.append(["subject": key.subject, "number": key.number, "from_term": from, "to_term": to])
+            moves.append([
+                "subject": key.subject,
+                "number": key.number,
+                "from_term": from,
+                "to_term": to,
+                "reason": "Not offered in \(from). \(to) offers it, and prerequisites that are in this plan stay in an earlier term.",
+            ])
+        } else if !termOffers(key, term: to, library: library) {
+            let offeredSomewhere = termCodes.contains { termOffers(key, term: $0, library: library) }
+            let reason = offeredSomewhere
+                ? "Moving \(key.description) would put it ahead of a prerequisite that is also in this plan."
+                : "No term already in this plan offers \(key.description)."
+            unresolved.append(["subject": key.subject, "number": key.number, "reason": reason])
         }
     }
-    let terms = updatedTerms(plan, library: library)
-    return ["terms": terms, "moves": moves, "notes": notes]
-}
 
-func termMap(of plan: DegreePlan, library: CatalogLibrary) -> [CourseKey: String] {
-    var map: [CourseKey: String] = [:]
-    for semester in plan.terms {
-        let code = bannerCode(season: semester.season, year: semester.year) ?? ""
-        for key in semester.courses.compactMap(\.key) {
-            map[key] = code
+    var coursesByTerm: [String: [CourseKey]] = [:]
+    for key in order {
+        coursesByTerm[placement[key] ?? "", default: []].append(key)
+    }
+    var emitted = Set<String>()
+    let terms: [[String: Any]] = input.map { term in
+        let courses: [[String: Any]]
+        if emitted.insert(term.term).inserted {
+            courses = (coursesByTerm[term.term] ?? []).map { ["subject": $0.subject, "number": $0.number] }
+        } else {
+            courses = []
         }
+        return ["term": term.term, "courses": courses]
     }
-    _ = library
-    return map
+    return ["moves": moves, "unresolved": unresolved, "plan": ["terms": terms]]
 }
 
-func updatedTerms(_ plan: DegreePlan, library: CatalogLibrary) -> [[String: Any]] {
-    plan.terms.compactMap { semester in
-        guard let code = bannerCode(season: semester.season, year: semester.year) else { return nil }
-        let courses: [[String: Any]] = semester.courses.compactMap { course in
-            guard let key = course.key else { return nil }
-            return ["subject": key.subject, "number": key.number]
-        }
-        return ["term": code, "courses": courses]
+func termOffers(_ key: CourseKey, term: String, library: CatalogLibrary) -> Bool {
+    guard let index = library.index(for: term) else { return false }
+    return !index.sections(for: key).isEmpty
+}
+
+func bundledPrerequisite(_ key: CourseKey, library: CatalogLibrary) -> Requisite? {
+    for code in CatalogLibrary.allowedTermCodes {
+        guard let course = library.index(for: code)?.course(key), course.detailsLoaded else { continue }
+        return course.prereqs
+    }
+    return nil
+}
+
+/// `moved` keeps its own prerequisites in an earlier term, and every other course
+/// in the plan that depends on it still has that prerequisite earlier.
+func moveKeepsOrder(_ moved: CourseKey, placement: [CourseKey: String], library: CatalogLibrary) -> Bool {
+    if let requisite = bundledPrerequisite(moved, library: library),
+       !prerequisiteHolds(requisite, courseTerm: placement[moved] ?? "", placement: placement) {
+        return false
+    }
+    for (other, term) in placement where other != moved {
+        guard let requisite = bundledPrerequisite(other, library: library),
+              requisiteReferences(requisite, moved) else { continue }
+        if !prerequisiteHolds(requisite, courseTerm: term, placement: placement) { return false }
+    }
+    return true
+}
+
+func prerequisiteHolds(_ requisite: Requisite, courseTerm: String, placement: [CourseKey: String]) -> Bool {
+    switch requisite {
+    case .course(let key):
+        guard let earlier = placement[key] else { return true }
+        return earlier < courseTerm
+    case .test:
+        return true
+    case .and(let items):
+        return items.allSatisfy { prerequisiteHolds($0, courseTerm: courseTerm, placement: placement) }
+    case .or(let items):
+        return items.isEmpty || items.contains { prerequisiteHolds($0, courseTerm: courseTerm, placement: placement) }
     }
 }
 
-func bannerCode(season: PlanSeason, year: Int) -> String? {
-    let code: String
-    switch season {
-    case .fall: code = String(format: "%d10", year + 1)
-    case .winter: code = String(format: "%d20", year)
-    case .spring: code = String(format: "%d30", year)
-    case .summerA: code = String(format: "%d40", year)
-    case .summerFull: code = String(format: "%d50", year)
-    case .summerB: code = String(format: "%d60", year)
+func requisiteReferences(_ requisite: Requisite, _ key: CourseKey) -> Bool {
+    switch requisite {
+    case .course(let course): return course == key
+    case .test: return false
+    case .and(let items), .or(let items): return items.contains { requisiteReferences($0, key) }
     }
-    return CatalogLibrary.allowedTermCodes.contains(code) ? code : code
-}
-
-func listKeys(_ keys: [CourseKey]) -> String {
-    keys.map(\.description).joined(separator: ", ")
 }

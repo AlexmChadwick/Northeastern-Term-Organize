@@ -53,9 +53,8 @@ extension UserDataFile {
     /// The decoded file when its stamp differs from `baseline`. Nil when the file
     /// is missing, unreadable, or still the version described by `baseline`.
     static func snapshotIfChanged(at url: URL, since baseline: UserDataFileStamp) -> UserDataFileSnapshot? {
-        guard FileManager.default.fileExists(atPath: url.path),
-              let bytes = try? Data(contentsOf: url),
-              let data = try? JSONDecoder.userData.decode(UserData.self, from: bytes) else { return nil }
+        guard let bytes = try? Data(contentsOf: url),
+              let data = try? decodeDocument(bytes, at: url) else { return nil }
         let stamp = stamp(of: data, bytes: bytes, mtime: modificationDate(of: url))
         guard stamp.differs(from: baseline) else { return nil }
         return UserDataFileSnapshot(data: data, stamp: stamp)
@@ -65,17 +64,23 @@ extension UserDataFile {
     /// only one side are combined, and a plan edited on both sides keeps the file's
     /// version plus a copy of `local` named "<plan> (edited in app)". The read and
     /// the replace share the file lock, so a writer cannot land between them.
+    /// A file that exists but cannot be read is not replaced.
     static func writeResolvingConflicts(
         local: UserData, loaded: UserData, baseline: UserDataFileStamp, to url: URL
     ) throws -> UserDataSaveResolution {
         try withLock(at: url) {
-            guard FileManager.default.fileExists(atPath: url.path) else {
+            let existing: UserData
+            let diskBytes: Data
+            do {
+                existing = try read(from: url)
+                diskBytes = try Data(contentsOf: url)
+            } catch let error as UserDataFileError {
+                guard case .missing = error else { throw error }
                 let encoded = try JSONEncoder.userData.encode(local)
                 try writeReplacing(encoded, to: url)
                 return resolution(for: local, bytes: encoded, url: url)
             }
-            let diskBytes = try Data(contentsOf: url)
-            let disk = try JSONDecoder.userData.decode(UserData.self, from: diskBytes)
+            let disk = existing
             let diskStamp = Self.stamp(of: disk, bytes: diskBytes, mtime: modificationDate(of: url))
             let merged: UserData
             if diskStamp.differs(from: baseline) {

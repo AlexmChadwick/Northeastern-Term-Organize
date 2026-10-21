@@ -12,14 +12,14 @@ import Foundation
 extension MCPTool {
     static let planTools: [MCPTool] = [
         MCPTool(name: "list_plans", description: "List saved schedule plans: id, name, terms, updated time, and revision.", properties: [:], required: [], readOnly: true) { _, server in
-            server.listPlans()
+            try server.listPlans()
         },
         MCPTool(name: "get_plan", description: "One saved plan, with terms, courses, chosen sections, clashes, and courses the bundled catalog does not offer in that term.", properties: ["plan_id": stringSchema], required: ["plan_id"], readOnly: true) { arguments, server in
             try server.getPlan(id: try planID(arguments))
         },
-        MCPTool(name: "create_plan", description: "Create a saved plan in the app's UserData.json. terms is optional.", properties: [
+        MCPTool(name: "create_plan", description: "Create a saved plan in the app's UserData.json. terms is an optional list of term strings such as 202730. Courses are added with add_course.", properties: [
             "name": stringSchema,
-            "terms": ["type": "array"],
+            "terms": ["type": "array", "items": stringSchema],
         ], required: ["name"], readOnly: false) { arguments, server in
             try server.createPlan(arguments)
         },
@@ -51,7 +51,7 @@ extension MCPTool {
         ], required: ["plan_id", "term", "subject", "number", "crn", "expected_revision"], readOnly: false) { arguments, server in
             try server.setSection(arguments)
         },
-        MCPTool(name: "apply_reorganize", description: "Run reorganize_plan on a saved plan and write the result. Returns the moves.", properties: [
+        MCPTool(name: "apply_reorganize", description: "Run reorganize_plan on a saved plan and write the result. Returns the moves and any unresolved courses.", properties: [
             "plan_id": stringSchema, "expected_revision": intSchema,
         ], required: ["plan_id", "expected_revision"], readOnly: false, destructive: true) { arguments, server in
             try server.applyReorganize(arguments)
@@ -65,38 +65,49 @@ extension MCPTool {
 }
 
 extension TermOrganizeMCPServer {
-    func listPlans() -> [String: Any] {
-        let data = (try? UserDataFile.read(from: plansURL)) ?? UserData()
+    func listPlans() throws -> [String: Any] {
+        let data = try storedPlans()
         let groups = PlanGroup.groups(in: data.plans)
         return ["plans": groups.map { $0.summary() }]
     }
 
     func getPlan(id: UUID) throws -> [String: Any] {
-        let data = (try? UserDataFile.read(from: plansURL)) ?? UserData()
+        let data = try storedPlans()
         guard let group = PlanGroup.groups(in: data.plans).first(where: { $0.id == id }) else {
             throw MCPToolError(code: "unknown_plan", message: "No saved plan \(id.uuidString).")
         }
         return try planPayload(group)
     }
 
+    /// A missing file is an empty document. A file that exists but cannot be read
+    /// is a storage error, including permission failures, malformed JSON, and a
+    /// newer file version. It is never reported as zero plans.
+    func storedPlans() throws -> UserData {
+        switch UserDataFile.inspect(at: plansURL) {
+        case .missing:
+            return UserData()
+        case .ready(let data):
+            return data
+        case .unreadable(let path, let reason):
+            let detail = reason.isEmpty ? "unreadable" : reason
+            throw MCPToolError(code: "storage_error", message: "Cannot read \(path): \(detail)")
+        }
+    }
+
     func createPlan(_ arguments: [String: Any]) throws -> [String: Any] {
         let name = stringArg(arguments, "name") ?? ""
         guard !name.isEmpty else { throw MCPToolError(code: "bad_name", message: "name is required.") }
-        let requested = arguments["terms"] as? [[String: Any]] ?? []
+        let requested = try termStringList(arguments["terms"])
         let folder = UUID()
         var created: PlanGroup?
         try UserDataFile.modify(at: plansURL) { data in
+            let codes = requested.isEmpty
+                ? [CatalogLibrary.allowedTermCodes.first { library.index(for: $0) != nil } ?? "202730"]
+                : requested
             var plans: [SchedulePlan] = []
-            if requested.isEmpty {
-                let code = CatalogLibrary.allowedTermCodes.first { library.index(for: $0) != nil } ?? "202730"
+            for code in codes {
+                try validateTerm(code)
                 plans.append(newSchedule(name: name, term: code, folder: folder, courses: [], data: data))
-            } else {
-                for row in requested {
-                    let code = stringArg(row, "term") ?? ""
-                    try validateTerm(code)
-                    let courses = try coursesForSave(courseList(row["courses"]), term: code, crn: nil)
-                    plans.append(newSchedule(name: name, term: code, folder: folder, courses: courses, data: data))
-                }
             }
             data.plans.append(contentsOf: plans)
             created = PlanGroup(id: folder, plans: plans)
@@ -206,15 +217,15 @@ extension TermOrganizeMCPServer {
         let id = try planID(arguments)
         let expected = try expectedRevision(arguments)
         let before = try getPlan(id: id)
-        let input = (before["terms"] as? [[String: Any]] ?? []).map { row in
-            ReorganizeTerm(term: stringArg(row, "term") ?? "", courses: courseList(row["courses"]))
-        }
-        let reorganized = try reorganize(input, library: library)
+        let input = try planTerms(before["terms"], library: library)
+        let reorganized = reorganize(input, library: library)
         let moves = reorganized["moves"] as? [[String: Any]] ?? []
+        let unresolved = reorganized["unresolved"] as? [[String: Any]] ?? []
+        let planObject = reorganized["plan"] as? [String: Any] ?? [:]
         let result = try mutate(id: id, expected: expected) { group in
             let name = group.plans.first?.name ?? "Plan"
             var rebuilt: [SchedulePlan] = []
-            for row in reorganized["terms"] as? [[String: Any]] ?? [] {
+            for row in planObject["terms"] as? [[String: Any]] ?? [] {
                 let code = stringArg(row, "term") ?? ""
                 let keys = courseList(row["courses"])
                 var plan = group.plans.first { $0.termCode == code } ?? newSchedule(name: name, term: code, folder: group.id, courses: [], data: UserData())
@@ -231,7 +242,7 @@ extension TermOrganizeMCPServer {
         }
         var payload = result
         payload["moves"] = moves
-        payload["notes"] = reorganized["notes"] ?? []
+        payload["unresolved"] = unresolved
         return payload
     }
 
@@ -334,11 +345,6 @@ extension TermOrganizeMCPServer {
         return plan
     }
 
-    private func coursesForSave(_ keys: [CourseKey], term: String, crn: String?) throws -> [CourseKey] {
-        for key in keys { try validateCourse(key, term: term, crn: crn) }
-        return keys
-    }
-
     private func validateTerm(_ code: String) throws {
         guard CatalogLibrary.allowedTermCodes.contains(code), library.index(for: code) != nil else {
             throw MCPToolError(code: "unknown_term", message: "Term \(code) is not a bundled catalog. Use 202710 or 202730.")
@@ -415,6 +421,30 @@ struct PlanGroup {
         let grouped = byFolder.map { PlanGroup(id: $0.key, plans: $0.value) }
         return (grouped + singles).sorted { $0.updated > $1.updated }
     }
+}
+
+func termStringList(_ raw: Any?) throws -> [String] {
+    guard let raw else { return [] }
+    let values: [Any]
+    if let list = raw as? [String] {
+        values = list
+    } else if let list = raw as? [Any] {
+        values = list
+    } else {
+        throw MCPToolError(code: "invalid_argument", message: "terms must be a list of term strings such as \"202730\".")
+    }
+    var codes: [String] = []
+    for value in values {
+        guard let code = value as? String else {
+            throw MCPToolError(code: "invalid_argument", message: "terms must be a list of term strings such as \"202730\".")
+        }
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw MCPToolError(code: "invalid_argument", message: "terms must be a list of term strings such as \"202730\".")
+        }
+        codes.append(trimmed)
+    }
+    return codes
 }
 
 func planID(_ arguments: [String: Any]) throws -> UUID {

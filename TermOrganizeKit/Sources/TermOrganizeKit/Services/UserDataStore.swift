@@ -42,7 +42,15 @@ final class UserDataStore {
 
     init(fileURL: URL = AppPaths.userDataURL) {
         self.fileURL = fileURL
-        let stored = (try? UserDataFile.read(from: fileURL)) ?? UserData()
+        let stored: UserData
+        switch UserDataFile.inspect(at: fileURL) {
+        case .ready(let data):
+            stored = data
+        case .missing, .unreadable:
+            // An unreadable file is not an empty document. Leaving memory empty
+            // here is safe because `writeNow` refuses to replace that file.
+            stored = UserData()
+        }
         preferences = stored.preferences
         saved = stored.saved
         recents = stored.recents
@@ -419,6 +427,10 @@ final class UserDataStore {
     private func writeNow() {
         saveTask?.cancel()
         saveTask = nil
+        if case .unreadable = UserDataFile.inspect(at: fileURL) {
+            scheduleSave()
+            return
+        }
         let outcome: UserDataSaveResolution
         do {
             outcome = try UserDataFile.writeResolvingConflicts(

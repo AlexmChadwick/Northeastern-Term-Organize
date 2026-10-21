@@ -2,75 +2,103 @@
 
 Unofficial and not affiliated with Northeastern University.
 
-`term-organize-mcp` speaks [MCP](https://modelcontextprotocol.io) over stdin and stdout
-(JSON-RPC 2.0, protocol `2025-06-18`, `Content-Length` framing). It reads only the
-Fall 2026 (`202710`) and Spring 2027 (`202730`) catalogs bundled with the app. It does
-not open a network connection and it does not log in. Instructor email addresses are
-included only when the domain is exactly `northeastern.edu` or `neu.edu`.
+`term-organize-mcp` speaks [MCP](https://modelcontextprotocol.io) over stdin and stdout.
+It reads only the Fall 2026 (`202710`) and Spring 2027 (`202730`) catalogs bundled with
+the app. It does not open a network connection and it does not log in.
 
 The same tool names and JSON shapes are the contract for the Mac, Windows, and Linux
 servers. A tool result has `content` (one text block of JSON), `structuredContent`
-(the same object), and `isError`. Failures use `structuredContent.error` and
-`structuredContent.message`.
+(the same object), and `isError`.
 
 Build and client snippets are in the README section [Local MCP server](../README.md#local-mcp-server).
+
+## Shared contract
+
+- Transport: stdio, newline-delimited JSON-RPC 2.0, one message per line, per the MCP stdio spec (protocol 2025-06-18). No Content-Length framing.
+- Term objects: {"term":"202730","name":"Spring 2027"}. The key is always "term", never "code".
+- Revisions: integer, starting at 1 and incremented on every change to that plan.
+- Errors: a tool result with isError:true and structuredContent {"error":{"code":C,"message":M}}, where C is one of: invalid_argument, not_found, revision_conflict, confirm_required, read_only, storage_error, unknown_tool. The message is never empty. A write tool called with --read-only on returns read_only, not unknown_tool. Write tools stay hidden from tools/list.
+- Instructors in get_course: [{"name":..., "email":... (optional)}]. The email is present only when its domain is EXACTLY northeastern.edu or neu.edu, compared case-insensitively. Subdomains are not allowed (husky.neu.edu, ccs.neu.edu, mail.neu.edu are all dropped).
+- create_plan {name, terms?: ["202710","202730"]}, a list of term strings.
+- reorganize_plan accepts either {plan_id} or {plan:{terms:[{term, courses:[{subject, number}]}]}}. It returns {moves:[{subject, number, from_term, to_term, reason}], unresolved:[{subject, number, reason}], plan:{...}}.
+- Reorganize rule, the same everywhere: a course moves only into a term the plan already has. The target term's bundled catalog must offer the course, prerequisite order within the plan must be kept, and it never adds a semester. A course is offered in a term when the bundled catalog for that term has at least one section of it.
+- Shared fixture: tests/fixtures/mcp-reorganize-fixture.json. It is a plan with CS 4805, CS 2535, CS 2700, CS 4130 and CS 2701 in Fall 2026, plus an empty Spring 2027. Each server must have a test that checks its output against the expected moves. Work out the expected result from the bundled 202730 catalog and the prereqs, and write it into the fixture. Include in your report the per-course reasoning: offered in 202730 yes/no, and prereq status.
+- Storage failures: if the plan file exists but can't be read (permission denied, sandbox, malformed JSON, unknown newer version), every plan tool returns storage_error with the path and reason. NEVER treat a read failure as an empty plan list, and NEVER write over a file you couldn't read. A missing file is the only case that counts as empty.
 
 ## Catalog location
 
 The server loads `term-202710.catalog` and `term-202730.catalog` from
 `NEUClassSearch/Resources/Catalog`, walking up from the current directory, the
 executable, and the app bundle. `TERM_ORGANIZE_CATALOG_DIR` overrides that directory.
-Any other term code is rejected with `unknown_term`.
+Any other term code is rejected. The tool error code is `invalid_argument`.
 
 ## Saved plans
 
 Plans are not stored in SwiftData. The Mac app writes one JSON file, `UserData.json`,
 through `UserDataStore`. Each schedule is a `SchedulePlan`: a name, one `termCode`,
 the courses, the chosen CRNs, and timestamps. `UserDataStore` loads that file with
-`UserDataFile.read` and writes it with `UserDataFile.write`.
+`UserDataFile.read` and writes it with `UserDataFile.writeResolvingConflicts`.
 
-On a sandboxed Mac the file is:
+### Where the file lives
+
+Team `832J6JB4V7` shares one app group between the sandboxed Mac app and the MCP helper:
+
+```
+832J6JB4V7.com.alexchadwick.termorganize
+```
+
+`UserData.json` is stored in that group container:
+
+```
+~/Library/Group Containers/832J6JB4V7.com.alexchadwick.termorganize/Library/Application Support/UserData.json
+```
+
+The Mac entitlements are `NEUClassSearchMac/NEUClassSearchMac.entitlements` and
+`NEUClassSearchMac/NEUClassSearchMac-Local.entitlements`. Both list that group and
+keep the app sandbox. The helper entitlement file is
+`TermOrganizeKit/term-organize-mcp.entitlements`. It lists the same group and does
+not turn on the app sandbox, so the helper can still read catalogs from the repo.
+`Tools/sign-term-organize-mcp.sh` signs the helper as
+`com.alexchadwick.termorganize.mcp` with the Mac target's signing identity and copies
+it next to `Term Organize.app` (not inside the bundle). An ad hoc local build
+(`CODE_SIGN_IDENTITY` empty or `-`) skips signing and still builds. A team-signed
+build fails if codesign fails. Register the group for the Mac App ID in the Apple
+developer portal before that team build, or automatic signing fails.
+
+The iOS app and the widgets keep `group.com.alexchadwick.neuclasssearch`. That
+container is the widget snapshot (`WidgetSchedule.json`) only. It is not the plans file.
+
+The first launch that can see the Mac group copies an existing container file:
 
 ```
 ~/Library/Containers/com.alexchadwick.neuclasssearch/Data/Library/Application Support/UserData.json
 ```
 
-The shipping entitlements (`NEUClassSearchMac/NEUClassSearchMac.entitlements` and
-`NEUClassSearchMac-Local.entitlements`) turn on the app sandbox. They do not include
-`com.apple.security.application-groups`. The iOS app and the widgets do share
-`group.com.alexchadwick.neuclasssearch`, and that container holds the widget snapshot
-only (`WidgetSchedule.json`), not the user's plans.
+The copy is `UserData.json.premigration.bak` beside the original, and it is not
+overwritten. The original is deleted only after the group copy's bytes match. An
+unreadable original is left in place. If the group file already exists, the old file
+is left alone. `TERM_ORGANIZE_USER_DATA` overrides the path and skips that copy.
+Tests set it and never touch a real plans file.
 
-The MCP process is a normal command-line tool. Claude Desktop and Cursor launch it
-outside the app sandbox. An unsandboxed process running as the same user can read and
-write the sandboxed app's container. `PlanFileLocation.resolve` uses the container
-path when that Application Support directory exists, and otherwise
-`AppPaths.userDataURL` (the process Application Support directory, which is what an
-unsandboxed app would use). `TERM_ORGANIZE_USER_DATA` overrides the path. Tests set
-that variable and never touch a real plans file.
-
-This does not weaken the app sandbox. The entitlements files are unchanged, the tool
-is not signed with the app's entitlements, and plans are not copied into the widget
-app group. Putting `UserData.json` in that group would expose the whole plans file to
-every process that already has the widget group, which the Mac app does not have
-today. Embedding the binary inside `Term Organize.app` and giving it the app sandbox
-would also fail to share the app's container: a helper launched by Claude or Cursor
-is not an XPC service of the app, so a sandbox entitlement would give it a different
-container unless an app group were added. The unsandboxed helper, pointed at the
-file the app already uses, is the route that leaves the sandbox as it is.
+A sandboxed Mac build that does not have the group (an ad hoc local build) keeps
+`UserData.json` in its own Application Support directory. The next team-signed launch
+copies that container file into the group.
 
 Writes take an exclusive lock (`UserData.json.lock`), copy the previous file to
 `UserData.json.bak` (one rolling backup), write a temp file in the same directory,
-and `rename` it over `UserData.json`.
+and `rename` it over `UserData.json`. That backup is separate from the premigration
+backup. A read failure does not create either write.
 
 The app watches `UserData.json` with a file source and reloads it when the bytes
 change, including while the window is already active. Becoming active reloads too.
 A reload waits if the app still has an edit that has not been written. That flush
-does not replace the file blindly. It compares the file with the last load, using
-each plan's revision and a SHA-256 of the bytes (a new modification time counts
+does not replace a file it could not read. It compares the file with the last load,
+using each plan's revision and a SHA-256 of the bytes (a new modification time counts
 only when the bytes changed too). Plans edited on different sides are combined.
 When both sides edited the same plan, the file's version stays and the app's
 version is saved beside it as "<plan> (edited in app)". An MCP write is not dropped.
+The Mac sidebar and schedule lists middle-truncate that name and show an "App edit"
+badge, so the suffix is not clipped off the end of the row.
 
 ### How an MCP plan maps onto schedules
 
@@ -79,13 +107,14 @@ Those schedules share an optional `folderID`. The plan id is that UUID. A schedu
 the app created with no `folderID` shows up as its own one-term plan, and the plan
 id is that schedule's id. The app still lists each term as its own schedule. Both
 `folderID` and `revision` are optional, so a `UserData.json` written by an older
-build still decodes. A missing revision counts as `0`.
+build still decodes. A missing revision counts as `0`. A `version` above `1` is an
+unknown newer file: every plan tool returns `storage_error` and nothing is written.
 
 Every write except `create_plan` requires `expected_revision`. The saved revision is
 the highest `revision` among the plan's schedules. If it does not match, the tool
 returns `revision_conflict` and does not write. A successful write sets every
-schedule in the plan to `expected_revision + 1`. The app's own save paths bump
-`revision` the same way.
+schedule in the plan to `expected_revision + 1`. New plans start at revision `1`.
+The app's own save paths bump `revision` the same way.
 
 A course is accepted when it exists in either bundled catalog, so a course that is
 not taught in the target term can still be saved (that is what reorganize moves).
@@ -95,8 +124,8 @@ course. Unknown courses and CRNs are rejected and nothing is written.
 ## Read-only mode
 
 `--read-only`, or `TERM_ORGANIZE_MCP_READONLY=1`, omits every tool whose
-`readOnlyHint` is false. `list_plans` and `get_plan` stay. Calling a hidden write
-tool returns `read_only`.
+`readOnlyHint` is false from `tools/list`. `list_plans` and `get_plan` stay.
+Calling a hidden write tool returns `read_only`, not `unknown_tool`.
 
 ## Annotations
 
@@ -118,19 +147,10 @@ No arguments.
 }
 ```
 
-Only catalogs that actually loaded are listed. `202730` is listed before `202710`
-when both loaded.
-
 ### `search_courses`
 
-| Field | Required | Notes |
-| --- | --- | --- |
-| `term` | yes | `202710` or `202730` |
-| `query` | no | Same search text the app uses. Empty lists courses in code order. |
-| `subject` | no | Compared case-insensitively. |
-| `number` | no | Compared case-insensitively. |
-| `attribute` | no | Section attribute code, uppercased for the match. |
-| `limit` | no | Default 25, maximum 100. |
+Required: `term`. Optional: `query`, `subject`, `number`, `attribute`, `limit`
+(1 to 100, default 25).
 
 ```json
 {
@@ -139,9 +159,9 @@ when both loaded.
     {
       "subject": "CS",
       "number": "3000",
-      "title": "Algorithms and Data",
+      "title": "Algorithms",
       "credits": { "min": 4, "max": 4 },
-      "attributes": ["NUpath Natural and Designed World"]
+      "attributes": ["NCFQ"]
     }
   ]
 }
@@ -151,27 +171,9 @@ when both loaded.
 
 Required: `term`, `subject`, `number`.
 
-The course object from `search_courses`, plus `term`, `description`, and `sections`.
-
-```json
-{
-  "crn": "12345",
-  "section": "01",
-  "type": "Lecture",
-  "meetings": [
-    { "days": ["monday", "wednesday"], "start": "09:50", "end": "11:30", "location": "Snell Library 001" }
-  ],
-  "instructors": [
-    { "name": "Lovelace, Ada", "email": "a.lovelace@northeastern.edu" }
-  ],
-  "seats": { "remaining": 3, "capacity": 40 }
-}
-```
-
-`email` is omitted when the address is missing or not on `northeastern.edu` or `neu.edu`.
-`start` and `end` are 24-hour `HH:MM` and are omitted when the meeting has no time.
-`seats` is omitted when the catalog has neither a capacity nor a remaining count.
-`days` uses `sunday` through `saturday`.
+Instructors are `[{"name": "...", "email": "..."}]`. `email` is present only when
+its domain is exactly `northeastern.edu` or `neu.edu`, compared case-insensitively.
+The local part is left as it was written. Subdomains are dropped.
 
 ### `check_schedule`
 
@@ -198,7 +200,7 @@ Required: `term`, `courses` (`[{ "subject", "number" }]`). Optional `constraints
 | `days_off` | Array of `sunday` through `saturday`. |
 
 Returns up to 8 conflict-free combinations, best score first. A course with no
-sections in that term returns `not_offered`.
+sections in that term returns `not_found` (it has no sections in that bundled term).
 
 ```json
 {
@@ -217,25 +219,51 @@ sections in that term returns `not_offered`.
 
 ### `reorganize_plan`
 
-Does not save. Required: `terms`, each `{ "term", "courses": [{ "subject", "number" }] }`.
-
-Same move as the app's whole-plan reorganize (`DegreePlanReordering`): a course with
-no sections in its term is moved to a later bundled term where it is taught, without
-breaking prerequisites that are present in the bundled catalogs. The loop stops after
-eight moves or when nothing else can move.
+Does not save. Pass either `plan_id` or:
 
 ```json
 {
-  "terms": [
-    { "term": "202710", "courses": [] },
-    { "term": "202730", "courses": [{ "subject": "CS", "number": "3500" }] }
-  ],
-  "moves": [
-    { "subject": "CS", "number": "3500", "from_term": "202710", "to_term": "202730" }
-  ],
-  "notes": ["Move CS 3500 to Spring 2027"]
+  "plan": {
+    "terms": [
+      { "term": "202710", "courses": [{ "subject": "CS", "number": "3500" }] },
+      { "term": "202730", "courses": [{ "subject": "CS", "number": "3000" }] }
+    ]
+  }
 }
 ```
+
+A course moves only into a term the plan already has, and only when that term's
+bundled catalog has at least one section of it. Prerequisites that are also in the
+plan must sit in a strictly earlier term (`202710` before `202730`). A prerequisite
+that is not in the plan does not block the move. Tests do not block the move.
+Corequisites are ignored. The tool does not add a semester, and it does not drop an
+empty term. This is separate from the app's degree-plan reorganize.
+
+```json
+{
+  "moves": [
+    {
+      "subject": "CS",
+      "number": "3500",
+      "from_term": "202710",
+      "to_term": "202730",
+      "reason": "Not offered in 202710. 202730 offers it, and prerequisites that are in this plan stay in an earlier term."
+    }
+  ],
+  "unresolved": [],
+  "plan": {
+    "terms": [
+      { "term": "202710", "courses": [] },
+      { "term": "202730", "courses": [{ "subject": "CS", "number": "3000" }, { "subject": "CS", "number": "3500" }] }
+    ]
+  }
+}
+```
+
+The shared fixture `tests/fixtures/mcp-reorganize-fixture.json` is the check for the
+bundled catalogs. All five Fall 2026 courses in that file move to Spring 2027.
+None of them have a section in `202710`. Each has at least one section in `202730`.
+Their prerequisites are not in the plan, so order is kept. `unresolved` is empty.
 
 ## Plan tools
 
@@ -243,7 +271,8 @@ eight moves or when nothing else can move.
 
 ### `list_plans`
 
-No arguments. Read-only.
+No arguments. Read-only. A missing file returns `{ "plans": [] }`. A file that
+exists but cannot be read returns `storage_error`.
 
 ```json
 {
@@ -302,9 +331,11 @@ bundled term. `clashes` lists chosen sections whose meetings overlap.
 
 ### `create_plan`
 
-Required: `name`. Optional: `terms`, each `{ "term", "courses": [{ "subject", "number" }] }`.
-With no `terms`, the plan has one schedule on the newest loaded bundled term (`202730`
-when that catalog loaded). The new revision is `1`.
+Required: `name`. Optional: `terms`, a list of term strings such as `"202710"` and
+`"202730"`. Courses are not accepted here. Add them with `add_course`. With no
+`terms`, the plan has one empty schedule on the newest loaded bundled term (`202730`
+when that catalog loaded). The new revision is `1`. An object in `terms` is
+`invalid_argument` and nothing is written.
 
 ### `rename_plan`
 
@@ -337,7 +368,7 @@ The course must already be in that term. Replaces any CRN previously chosen for 
 Required: `plan_id`, `expected_revision`. Destructive. Runs `reorganize_plan` on the
 saved courses and writes the result. Chosen CRNs are kept when they still belong to
 a course that remains in that term. The response is the `get_plan` object plus
-`moves` and `notes` from `reorganize_plan`.
+`moves` and `unresolved` from `reorganize_plan`.
 
 ### `delete_plan`
 
@@ -350,33 +381,26 @@ unless `confirm` is `true`. Destructive.
 
 ## Errors
 
-| `error` | When |
-| --- | --- |
-| `unknown_tool` | The name is not a tool this process is serving. |
-| `read_only` | A write tool was called while `--read-only` is on. |
-| `catalog_unavailable` | A bundled catalog file could not be loaded. |
-| `unknown_term` | The term is not `202710` or `202730`. |
-| `unknown_course` | The course is not in the bundled catalogs, or it is not on that plan term. |
-| `unknown_crn` | The CRN is not in that term, or it is not a section of that course. |
-| `not_offered` | `suggest_schedule` was asked for a course with no sections in that term. |
-| `unknown_plan` | `plan_id` does not match a saved plan. |
-| `revision_conflict` | `expected_revision` is not the saved revision. `revision` is also returned. |
-| `confirm_required` | `delete_plan` was called without `confirm: true`. |
-| `bad_plan` | `plan_id` is not a UUID, or `terms` is empty for `reorganize_plan`. |
-| `bad_name` | `name` is missing. |
-| `bad_revision` | `expected_revision` is missing. |
-| `bad_course` | `subject` or `number` is missing. |
-| `bad_time` | A constraint time is not `HH:MM`. |
-| `bad_day` | A day name is not `sunday` through `saturday`. |
-| `missing_courses` | `suggest_schedule` was given an empty `courses` array. |
-| `failed` | Any other error. The message is the underlying description. |
-
-`revision_conflict` looks like:
+Tool failures set `isError` to true. `structuredContent` is exactly:
 
 ```json
 {
-  "error": "revision_conflict",
-  "message": "The plan changed. expected_revision was 1 and the saved revision is 2.",
-  "revision": 2
+  "error": {
+    "code": "revision_conflict",
+    "message": "The plan changed. expected_revision was 1 and the saved revision is 2."
+  }
 }
 ```
+
+`message` is never empty. Codes outside this list are collapsed before the result is
+returned.
+
+| `code` | When |
+| --- | --- |
+| `invalid_argument` | The arguments are the wrong shape or name a term, time, or day this server does not accept. Also the code for an underlying error that is not one of the codes below. |
+| `not_found` | Unknown course, CRN, plan, or a bundled catalog that is not available. `suggest_schedule` uses this when a course has no sections in that term. |
+| `revision_conflict` | `expected_revision` is not the saved revision. The message names both numbers. |
+| `confirm_required` | `delete_plan` was called without `confirm: true`. |
+| `read_only` | A write tool was called while `--read-only` is on. The tool stays hidden from `tools/list`. |
+| `storage_error` | The plan file exists but cannot be read, or the write could not be locked or replaced. The message includes the path and the reason. The file is left as it was. |
+| `unknown_tool` | The name is not a tool this server implements. |

@@ -90,27 +90,48 @@ final class TermOrganizeMCPServer {
     }
 
     func call(name: String, arguments: [String: Any]) -> [String: Any] {
-        guard let tool = toolDefinitions().first(where: { $0.name == name }) else {
+        // Dispatch uses every tool. `tools/list` still hides writes while read-only,
+        // and a direct call to one of those hidden tools returns `read_only`.
+        guard let tool = (MCPTool.catalogTools + MCPTool.planTools).first(where: { $0.name == name }) else {
             return toolError("unknown_tool", "No tool named \(name).")
         }
         if readOnly && !tool.readOnly {
-            return toolError("read_only", "This server is running with --read-only. \(name) is hidden.")
+            return toolError("read_only", "This server is running with --read-only. \(name) is not available.")
         }
         do {
             let value = try tool.body(arguments, self)
             return toolSuccess(value)
         } catch let error as MCPToolError {
-            var payload: [String: Any] = ["error": error.code, "message": error.message]
-            for (key, extra) in error.extra { payload[key] = extra }
-            return toolResult(payload, isError: true)
+            let (code, message) = Self.canonical(error)
+            return toolError(code, message)
+        } catch let error as UserDataFileError {
+            return toolError("storage_error", error.storageMessage)
         } catch {
-            return toolError("failed", error.localizedDescription)
+            let message = error.localizedDescription
+            return toolError("invalid_argument", message.isEmpty ? "invalid_argument" : message)
         }
     }
 
     func toolDefinitions() -> [MCPTool] {
         let plans = readOnly ? MCPTool.planTools.filter(\.readOnly) : MCPTool.planTools
         return MCPTool.catalogTools + plans
+    }
+
+    /// Codes outside the shared contract collapse here. The message already says
+    /// what was wrong, including both revisions on a conflict.
+    static func canonical(_ error: MCPToolError) -> (code: String, message: String) {
+        let code: String
+        switch error.code {
+        case "invalid_argument", "not_found", "revision_conflict", "confirm_required",
+             "read_only", "storage_error", "unknown_tool":
+            code = error.code
+        case "unknown_course", "unknown_crn", "unknown_plan", "not_offered", "catalog_unavailable":
+            code = "not_found"
+        default:
+            code = "invalid_argument"
+        }
+        let message = error.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (code, message.isEmpty ? code : message)
     }
 }
 
@@ -179,7 +200,14 @@ func toolSuccess(_ value: [String: Any]) -> [String: Any] {
 }
 
 func toolError(_ code: String, _ message: String) -> [String: Any] {
-    toolResult(["error": code, "message": message], isError: true)
+    let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    let payload: [String: Any] = [
+        "error": [
+            "code": code,
+            "message": text.isEmpty ? code : text,
+        ],
+    ]
+    return toolResult(payload, isError: true)
 }
 
 func toolResult(_ value: [String: Any], isError: Bool) -> [String: Any] {
@@ -210,35 +238,30 @@ func boolArg(_ arguments: [String: Any], _ key: String) -> Bool? {
     return nil
 }
 
+/// Newline-delimited JSON-RPC. One message per line. No Content-Length header.
 enum MCPFraming {
+    static let maxBytes = 8 * 1024 * 1024
+
     static func readMessage(from handle: FileHandle) -> Data? {
-        var header = Data()
-        while !header.contains(Data("\r\n\r\n".utf8)) {
+        var line = Data()
+        while true {
             let byte = handle.readData(ofLength: 1)
-            if byte.isEmpty { return nil }
-            header.append(byte)
-            if header.count > 64 * 1024 { return nil }
+            if byte.isEmpty {
+                return line.isEmpty ? nil : line
+            }
+            if byte[0] == 0x0A {
+                if line.last == 0x0D { line.removeLast() }
+                if line.isEmpty { continue }
+                return line
+            }
+            line.append(byte)
+            if line.count > maxBytes { return nil }
         }
-        let headerText = String(data: header, encoding: .utf8) ?? ""
-        var length = 0
-        for line in headerText.split(separator: "\r\n") where line.lowercased().hasPrefix("content-length:") {
-            length = Int(line.split(separator: ":").last?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
-        }
-        guard length > 0 else { return nil }
-        var body = Data()
-        while body.count < length {
-            let chunk = handle.readData(ofLength: length - body.count)
-            if chunk.isEmpty { return nil }
-            body.append(chunk)
-        }
-        return body
     }
 
     static func writeMessage(_ body: Data, to handle: FileHandle) {
-        let header = "Content-Length: \(body.count)\r\n\r\n"
-        if let data = header.data(using: .utf8) {
-            try? handle.write(contentsOf: data)
-        }
-        try? handle.write(contentsOf: body)
+        var line = body
+        line.append(0x0A)
+        try? handle.write(contentsOf: line)
     }
 }

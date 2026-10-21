@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the term-organize-mcp helper. This process is not app-sandboxed:
+  it still reads the bundled catalogs from the repository. The application group is
+  the same one the Mac app uses (832J6JB4V7.com.alexchadwick.termorganize), so a
+  team-signed helper can open UserData.json without a macOS access prompt.
+
+  The iOS widget group (group.com.alexchadwick.neuclasssearch) is not listed here.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>832J6JB4V7.com.alexchadwick.termorganize</string>
+	</array>
+</dict>
+</plist>

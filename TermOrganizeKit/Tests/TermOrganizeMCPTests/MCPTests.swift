@@ -9,6 +9,11 @@
 
 import Foundation
 import Testing
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 @testable import TermOrganizeKit
 
 @Suite(.serialized)
@@ -100,22 +105,54 @@ struct MCPToolTests {
 
     @Test func reorganizePlanMovesACourseThatIsNotOffered() throws {
         let result = try call("reorganize_plan", [
-            "terms": [
-                ["term": "202710", "courses": [["subject": "CS", "number": "3500"]]],
-                ["term": "202730", "courses": [["subject": "CS", "number": "3000"]]],
+            "plan": [
+                "terms": [
+                    ["term": "202710", "courses": [["subject": "CS", "number": "3500"]]],
+                    ["term": "202730", "courses": [["subject": "CS", "number": "3000"]]],
+                ],
             ],
         ])
         let moves = result["moves"] as? [[String: Any]] ?? []
         #expect(moves.contains { $0["number"] as? String == "3500" && $0["to_term"] as? String == "202730" })
+        #expect((moves.first?["reason"] as? String)?.isEmpty == false)
+        #expect((result["unresolved"] as? [Any])?.isEmpty == true)
+        let plan = result["plan"] as? [String: Any]
+        let terms = plan?["terms"] as? [[String: Any]] ?? []
+        let spring = try #require(terms.first { $0["term"] as? String == "202730" })
+        let courses = spring["courses"] as? [[String: Any]] ?? []
+        #expect(courses.contains { $0["number"] as? String == "3500" })
+    }
+
+    @Test func reorganizeFixtureMatchesBundledSpringCatalog() throws {
+        let url = try #require(MCPFixture.reorganizeFixtureURL())
+        let raw = try Data(contentsOf: url)
+        let fixture = try #require(JSONSerialization.jsonObject(with: raw) as? [String: Any])
+        let plan = try #require(fixture["plan"] as? [String: Any])
+        let directory = try #require(MCPFixture.bundledCatalogDirectory())
+        var indexes: [String: CatalogIndex] = [:]
+        for code in CatalogLibrary.allowedTermCodes {
+            let catalogURL = directory.appendingPathComponent(CatalogArchive.fileName(forTerm: code))
+            let catalog = try CatalogArchive.read(from: catalogURL)
+            indexes[code] = CatalogIndex.build(catalog)
+        }
+        let library = CatalogLibrary(indexes: indexes)
+        let server = TermOrganizeMCPServer(library: library, plansURL: plansURL, readOnly: true)
+        let result = server.call(name: "reorganize_plan", arguments: ["plan": plan])
+        #expect(result["isError"] as? Bool != true)
+        let body = try #require(result["structuredContent"] as? [String: Any])
+        let expected = try #require(fixture["expected"] as? [String: Any])
+        #expect(moveKeys(body["moves"]) == moveKeys(expected["moves"]))
+        #expect(moveKeys(body["unresolved"]) == moveKeys(expected["unresolved"]))
     }
 
     @Test func createListAndGetPlan() throws {
-        let created = try call("create_plan", [
-            "name": "Spring",
-            "terms": [["term": "202730", "courses": [["subject": "CS", "number": "3000"]]]],
-        ])
+        let created = try call("create_plan", ["name": "Spring", "terms": ["202730"]])
         let id = try #require(created["id"] as? String)
         #expect(created["revision"] as? Int == 1)
+        let added = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "expected_revision": 1,
+        ])
+        #expect(added["revision"] as? Int == 2)
         let listed = try call("list_plans", [:])
         let plans = listed["plans"] as? [[String: Any]] ?? []
         #expect(plans.contains { $0["id"] as? String == id && ($0["terms"] as? [String]) == ["202730"] })
@@ -135,7 +172,7 @@ struct MCPToolTests {
     }
 
     @Test func addCourseRejectsUnknownAndKeepsKnown() throws {
-        let id = try planID(try call("create_plan", ["name": "Spring", "terms": [["term": "202730"]]]))
+        let id = try planID(try call("create_plan", ["name": "Spring", "terms": ["202730"]]))
         let added = try call("add_course", [
             "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "crn": "2002", "expected_revision": 1,
         ])
@@ -149,27 +186,27 @@ struct MCPToolTests {
     }
 
     @Test func removeCourse() throws {
-        let id = try planID(try call("create_plan", [
-            "name": "Spring",
-            "terms": [["term": "202730", "courses": [["subject": "CS", "number": "3000"], ["subject": "CS", "number": "3500"]]]],
-        ]))
+        let id = try planID(try call("create_plan", ["name": "Spring", "terms": ["202730"]]))
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "expected_revision": 1,
+        ])
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3500", "expected_revision": 2,
+        ])
         let removed = try call("remove_course", [
-            "plan_id": id, "term": "202730", "subject": "CS", "number": "3500", "expected_revision": 1,
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3500", "expected_revision": 3,
         ])
         let courses = ((removed["terms"] as? [[String: Any]])?.first?["courses"] as? [[String: Any]]) ?? []
         #expect(courses.map { $0["number"] as? String } == ["3000"])
     }
 
     @Test func moveCourse() throws {
-        let id = try planID(try call("create_plan", [
-            "name": "Year",
-            "terms": [
-                ["term": "202710", "courses": [["subject": "CS", "number": "3000"]]],
-                ["term": "202730", "courses": []],
-            ],
-        ]))
+        let id = try planID(try call("create_plan", ["name": "Year", "terms": ["202710", "202730"]]))
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202710", "subject": "CS", "number": "3000", "expected_revision": 1,
+        ])
         let moved = try call("move_course", [
-            "plan_id": id, "subject": "CS", "number": "3000", "from_term": "202710", "to_term": "202730", "expected_revision": 1,
+            "plan_id": id, "subject": "CS", "number": "3000", "from_term": "202710", "to_term": "202730", "expected_revision": 2,
         ])
         let terms = moved["terms"] as? [[String: Any]] ?? []
         let spring = try #require(terms.first { $0["term"] as? String == "202730" })
@@ -178,23 +215,23 @@ struct MCPToolTests {
     }
 
     @Test func setSection() throws {
-        let id = try planID(try call("create_plan", [
-            "name": "Spring",
-            "terms": [["term": "202730", "courses": [["subject": "CS", "number": "3000"]]]],
-        ]))
+        let id = try planID(try call("create_plan", ["name": "Spring", "terms": ["202730"]]))
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "expected_revision": 1,
+        ])
         let updated = try call("set_section", [
-            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "crn": "2001", "expected_revision": 1,
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "crn": "2001", "expected_revision": 2,
         ])
         let courses = ((updated["terms"] as? [[String: Any]])?.first?["courses"] as? [[String: Any]]) ?? []
         #expect(courses.first?["crn"] as? String == "2001")
         let bad = server.call(name: "set_section", arguments: [
-            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "crn": "2003", "expected_revision": 2,
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "crn": "2003", "expected_revision": 3,
         ])
         #expect(bad["isError"] as? Bool == true)
     }
 
     @Test func revisionConflictLeavesTheFileAlone() throws {
-        let id = try planID(try call("create_plan", ["name": "Spring", "terms": [["term": "202730"]]]))
+        let id = try planID(try call("create_plan", ["name": "Spring", "terms": ["202730"]]))
         _ = try call("rename_plan", ["plan_id": id, "name": "First", "expected_revision": 1])
         let conflict = server.call(name: "rename_plan", arguments: [
             "plan_id": id, "name": "Stale", "expected_revision": 1,
@@ -202,13 +239,17 @@ struct MCPToolTests {
         #expect(conflict["isError"] as? Bool == true)
         let text = ((conflict["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
         #expect(text.contains("revision_conflict"))
+        let error = (conflict["structuredContent"] as? [String: Any])?["error"] as? [String: Any]
+        #expect(error?["code"] as? String == "revision_conflict")
+        #expect((error?["message"] as? String)?.isEmpty == false)
+        #expect((conflict["structuredContent"] as? [String: Any])?["revision"] == nil)
         let loaded = try call("get_plan", ["plan_id": id])
         #expect(loaded["name"] as? String == "First")
         #expect(loaded["revision"] as? Int == 2)
     }
 
     @Test func deletePlanRequiresConfirm() throws {
-        let id = try planID(try call("create_plan", ["name": "Gone", "terms": [["term": "202730"]]]))
+        let id = try planID(try call("create_plan", ["name": "Gone", "terms": ["202730"]]))
         let refused = server.call(name: "delete_plan", arguments: ["plan_id": id, "expected_revision": 1, "confirm": false])
         #expect(refused["isError"] as? Bool == true)
         let deleted = try call("delete_plan", ["plan_id": id, "expected_revision": 1, "confirm": true])
@@ -218,17 +259,18 @@ struct MCPToolTests {
     }
 
     @Test func applyReorganizeSavesTheMove() throws {
-        let id = try planID(try call("create_plan", [
-            "name": "Year",
-            "terms": [
-                ["term": "202710", "courses": [["subject": "CS", "number": "3500"]]],
-                ["term": "202730", "courses": [["subject": "CS", "number": "3000"]]],
-            ],
-        ]))
-        let applied = try call("apply_reorganize", ["plan_id": id, "expected_revision": 1])
+        let id = try planID(try call("create_plan", ["name": "Year", "terms": ["202710", "202730"]]))
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202710", "subject": "CS", "number": "3500", "expected_revision": 1,
+        ])
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "expected_revision": 2,
+        ])
+        let applied = try call("apply_reorganize", ["plan_id": id, "expected_revision": 3])
         let moves = applied["moves"] as? [[String: Any]] ?? []
         #expect(moves.contains { $0["number"] as? String == "3500" && $0["to_term"] as? String == "202730" })
-        #expect(applied["revision"] as? Int == 2)
+        #expect((applied["unresolved"] as? [Any])?.isEmpty == true)
+        #expect(applied["revision"] as? Int == 4)
     }
 
     @Test func readOnlyHidesWriteTools() throws {
@@ -244,6 +286,9 @@ struct MCPToolTests {
         #expect(!names.contains("apply_reorganize"))
         let denied = quiet.call(name: "delete_plan", arguments: ["plan_id": UUID().uuidString, "expected_revision": 1, "confirm": true])
         #expect(denied["isError"] as? Bool == true)
+        let error = (denied["structuredContent"] as? [String: Any])?["error"] as? [String: Any]
+        #expect(error?["code"] as? String == "read_only")
+        #expect((error?["message"] as? String)?.isEmpty == false)
     }
 
     @Test func destructiveToolsAreAnnotated() throws {
@@ -262,11 +307,12 @@ struct MCPToolTests {
     }
 
     @Test func appLoaderReadsTheSavedFileAndABackupIsKept() throws {
-        let created = try call("create_plan", [
-            "name": "Spring",
-            "terms": [["term": "202730", "courses": [["subject": "CS", "number": "3000"]]]],
+        let created = try call("create_plan", ["name": "Spring", "terms": ["202730"]])
+        let id = try planID(created)
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "expected_revision": 1,
         ])
-        _ = try call("rename_plan", ["plan_id": try planID(created), "name": "Renamed", "expected_revision": 1])
+        _ = try call("rename_plan", ["plan_id": id, "name": "Renamed", "expected_revision": 2])
         let backup = URL(fileURLWithPath: plansURL.path + ".bak")
         #expect(FileManager.default.fileExists(atPath: backup.path))
         // `UserDataStore` loads the file with `UserDataFile.read`.
@@ -274,7 +320,7 @@ struct MCPToolTests {
         let plan = try #require(stored.plans.first { $0.name == "Renamed" })
         #expect(plan.courses.map(\.key) == [CourseKey(subject: "CS", number: "3000")])
         #expect(plan.termCode == "202730")
-        #expect(plan.revision == 2)
+        #expect(plan.revision == 3)
     }
 
     @Test func presentedEmailsStayOnInstitutionalDomains() throws {
@@ -282,6 +328,10 @@ struct MCPToolTests {
         #expect(instructorJSON(mixed)["email"] as? String == "ada@northeastern.edu")
         let personal = Instructor(name: "Lovelace, Ada", primary: true, email: "ada@gmail.com")
         #expect(instructorJSON(personal)["email"] == nil)
+        let upper = Instructor(name: "Lovelace, Ada", primary: true, email: "ADA@Northeastern.EDU")
+        #expect(instructorJSON(upper)["email"] as? String == "ADA@Northeastern.EDU")
+        let subdomain = Instructor(name: "Lovelace, Ada", primary: true, email: "a@husky.neu.edu")
+        #expect(instructorJSON(subdomain)["email"] == nil)
         if let directory = CatalogLibrary.locateCatalogDirectory() {
             let url = directory.appendingPathComponent("term-202730.catalog")
             if let catalog = try? CatalogArchive.read(from: url) {
@@ -293,6 +343,70 @@ struct MCPToolTests {
                     }
                 }
             }
+        }
+    }
+
+    @Test func objectTermsAreInvalidArgument() throws {
+        let rejected = server.call(name: "create_plan", arguments: [
+            "name": "Spring",
+            "terms": [["term": "202730", "courses": [["subject": "CS", "number": "3000"]]]],
+        ])
+        let error = (rejected["structuredContent"] as? [String: Any])?["error"] as? [String: Any]
+        #expect(error?["code"] as? String == "invalid_argument")
+        #expect(!FileManager.default.fileExists(atPath: plansURL.path))
+    }
+
+    @Test func malformedPlanFileIsStorageError() throws {
+        let bytes = Data("{".utf8)
+        try bytes.write(to: plansURL)
+        try expectStorageErrorLeavesBytes(bytes, reason: "malformed JSON")
+    }
+
+    @Test func newerPlanFileVersionIsStorageError() throws {
+        let bytes = Data("{\"version\":2,\"plans\":[]}".utf8)
+        try bytes.write(to: plansURL)
+        try expectStorageErrorLeavesBytes(bytes, reason: "unknown newer version 2")
+    }
+
+    @Test func permissionDeniedPlanFileIsStorageError() throws {
+        let bytes = Data("{\"version\":1,\"plans\":[]}".utf8)
+        try bytes.write(to: plansURL)
+        #expect(chmod(plansURL.path, 0) == 0)
+        defer { chmod(plansURL.path, 0o644) }
+        let listed = server.call(name: "list_plans", arguments: [:])
+        let created = server.call(name: "create_plan", arguments: ["name": "Nope", "terms": ["202730"]])
+        chmod(plansURL.path, 0o644)
+        for result in [listed, created] {
+            #expect(result["isError"] as? Bool == true)
+            let error = (result["structuredContent"] as? [String: Any])?["error"] as? [String: Any]
+            #expect(error?["code"] as? String == "storage_error")
+            let message = error?["message"] as? String ?? ""
+            #expect(message.contains(plansURL.path))
+            #expect(message.contains("permission denied"))
+        }
+        #expect(try Data(contentsOf: plansURL) == bytes)
+        #expect(!FileManager.default.fileExists(atPath: plansURL.path + ".bak"))
+    }
+
+    private func expectStorageErrorLeavesBytes(_ bytes: Data, reason: String) throws {
+        let listed = server.call(name: "list_plans", arguments: [:])
+        let created = server.call(name: "create_plan", arguments: ["name": "Nope", "terms": ["202730"]])
+        for result in [listed, created] {
+            #expect(result["isError"] as? Bool == true)
+            let error = (result["structuredContent"] as? [String: Any])?["error"] as? [String: Any]
+            #expect(error?["code"] as? String == "storage_error")
+            let message = error?["message"] as? String ?? ""
+            #expect(message.contains(plansURL.path))
+            #expect(message.contains(reason))
+        }
+        #expect(try Data(contentsOf: plansURL) == bytes)
+        #expect(!FileManager.default.fileExists(atPath: plansURL.path + ".bak"))
+    }
+
+    private func moveKeys(_ raw: Any?) -> [[String]] {
+        let rows = raw as? [[String: Any]] ?? []
+        return rows.map { row in
+            [row["subject"] as? String ?? "", row["number"] as? String ?? "", row["from_term"] as? String ?? "", row["to_term"] as? String ?? ""]
         }
     }
 
@@ -336,31 +450,21 @@ struct MCPStdioTests {
         try process.run()
 
         func send(_ object: [String: Any]) throws {
-            let body = try JSONSerialization.data(withJSONObject: object)
-            let header = "Content-Length: \(body.count)\r\n\r\n"
-            input.fileHandleForWriting.write(Data(header.utf8))
+            var body = try JSONSerialization.data(withJSONObject: object)
+            body.append(0x0A)
+            #expect(body.filter { $0 == 0x0A }.count == 1)
             input.fileHandleForWriting.write(body)
         }
         func receive() throws -> [String: Any] {
             let handle = output.fileHandleForReading
-            var header = Data()
-            while !header.contains(Data("\r\n\r\n".utf8)) {
+            var line = Data()
+            while true {
                 let byte = handle.readData(ofLength: 1)
                 if byte.isEmpty { break }
-                header.append(byte)
+                if byte[0] == 0x0A { break }
+                if byte[0] != 0x0D { line.append(byte) }
             }
-            let headerText = String(data: header, encoding: .utf8) ?? ""
-            var length = 0
-            for line in headerText.split(separator: "\r\n") where line.lowercased().hasPrefix("content-length:") {
-                length = Int(line.split(separator: ":").last?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
-            }
-            var body = Data()
-            while body.count < length {
-                let chunk = handle.readData(ofLength: length - body.count)
-                if chunk.isEmpty { break }
-                body.append(chunk)
-            }
-            return (try JSONSerialization.jsonObject(with: body) as? [String: Any]) ?? [:]
+            return (try JSONSerialization.jsonObject(with: line) as? [String: Any]) ?? [:]
         }
 
         try send(["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": [
@@ -396,6 +500,26 @@ struct MCPStdioTests {
 }
 
 enum MCPFixture {
+    static func reorganizeFixtureURL() -> URL? {
+        walkUp(#filePath, relative: "tests/fixtures/mcp-reorganize-fixture.json")
+    }
+
+    static func bundledCatalogDirectory() -> URL? {
+        walkUp(#filePath, relative: "NEUClassSearch/Resources/Catalog")
+    }
+
+    private static func walkUp(_ file: String, relative: String) -> URL? {
+        var directory = URL(fileURLWithPath: file).deletingLastPathComponent()
+        for _ in 0..<8 {
+            let candidate = directory.appendingPathComponent(relative)
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            let parent = directory.deletingLastPathComponent()
+            if parent.path == directory.path { break }
+            directory = parent
+        }
+        return nil
+    }
+
     static func library() -> CatalogLibrary {
         CatalogLibrary(indexes: [
             "202710": CatalogIndex.build(catalog(term: "202710", courses: [

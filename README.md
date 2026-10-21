@@ -264,14 +264,19 @@ Cursor (`.cursor/mcp.json` in this repo, or the user MCP config):
 
 To start it read-only, add `"args": ["--read-only"]`.
 
-On a Mac where Term Organize has been launched, the server reads and writes the sandboxed
-app's existing file,
-`~/Library/Containers/com.alexchadwick.neuclasssearch/Data/Library/Application Support/UserData.json`.
-The app sandbox is unchanged. See [`docs/MCP.md`](docs/MCP.md) for why the server is a
-separate unsandboxed process. If the app still has an unsaved edit when the file
-changes, the next flush merges plans that were edited separately and, when both
-sides edited the same plan, keeps the file's version and a copy named
-"<plan> (edited in app)".
+Messages are one JSON object per line. There is no Content-Length header.
+
+On a team-signed Mac, the app and this helper share the app group
+`832J6JB4V7.com.alexchadwick.termorganize` (team `832J6JB4V7`). `UserData.json` lives in
+that group container. A team-signed Xcode build of the Mac app runs
+`Tools/sign-term-organize-mcp.sh`, which signs the helper with the same team and the
+same app group so macOS does not prompt for access. Register the group for the Mac App
+ID first. The iOS widget group is unchanged. The first launch that can see the group
+copies the old sandbox container file across, keeps `UserData.json.premigration.bak`,
+and deletes the original only after the copy matches. See [`docs/MCP.md`](docs/MCP.md).
+If the app still has an unsaved edit when the file changes, the next flush merges plans
+that were edited separately and, when both sides edited the same plan, keeps the file's
+version and a copy named "<plan> (edited in app)".
 
 Run the server tests with `cd TermOrganizeKit && swift test`. They use a temporary
 `UserData.json` and never the real plans file.

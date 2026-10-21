@@ -10,6 +10,11 @@
 import Foundation
 import Synchronization
 import Testing
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 @testable import TermOrganizeKit
 
 @Suite
@@ -179,6 +184,75 @@ struct PlanMergeTests {
         try UserDataFile.write(external, to: url)
         let sawChange = await hits.waitUntilPositive()
         #expect(sawChange)
+    }
+
+    @Test func writeResolvingConflictsLeavesANewerVersionUntouched() throws {
+        let url = try temporaryFile()
+        let bytes = Data("{\"version\":2,\"plans\":[]}".utf8)
+        try bytes.write(to: url)
+        let local = UserData()
+        let baseline = UserDataFileStamp(mtime: nil, hash: "", revisions: [:])
+        #expect(throws: UserDataFileError.self) {
+            _ = try UserDataFile.writeResolvingConflicts(local: local, loaded: local, baseline: baseline, to: url)
+        }
+        #expect(try Data(contentsOf: url) == bytes)
+    }
+
+    @Test func modifyLeavesMalformedJSONUntouched() throws {
+        let url = try temporaryFile()
+        let bytes = Data("not json".utf8)
+        try bytes.write(to: url)
+        #expect(throws: UserDataFileError.self) {
+            try UserDataFile.modify(at: url) { data in data.plans = [] }
+        }
+        #expect(try Data(contentsOf: url) == bytes)
+    }
+
+    @Test func migrationDeletesTheOriginalOnlyAfterTheCopyMatches() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("migrate-\(UUID().uuidString)", isDirectory: true)
+        let legacy = directory.appendingPathComponent("old/UserData.json")
+        let destination = directory.appendingPathComponent("group/UserData.json")
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let bytes = Data("{\"version\":1,\"plans\":[{\"name\":\"Keep\"}]}".utf8)
+        try bytes.write(to: legacy)
+        try UserDataMigration.migrate(from: legacy, to: destination)
+        #expect(try Data(contentsOf: destination) == bytes)
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        let backup = URL(fileURLWithPath: legacy.path + ".premigration.bak")
+        #expect(try Data(contentsOf: backup) == bytes)
+    }
+
+    @Test func migrationLeavesAnUnreadableOriginalInPlace() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("migrate-deny-\(UUID().uuidString)", isDirectory: true)
+        let legacy = directory.appendingPathComponent("old/UserData.json")
+        let destination = directory.appendingPathComponent("group/UserData.json")
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let bytes = Data("{\"version\":1,\"plans\":[{\"name\":\"Keep\"}]}".utf8)
+        try bytes.write(to: legacy)
+        #expect(chmod(legacy.path, 0) == 0)
+        defer { chmod(legacy.path, 0o644) }
+        #expect(throws: UserDataFileError.self) {
+            try UserDataMigration.migrate(from: legacy, to: destination)
+        }
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+        chmod(legacy.path, 0o644)
+        #expect(try Data(contentsOf: legacy) == bytes)
+        #expect(!FileManager.default.fileExists(atPath: legacy.path + ".premigration.bak"))
+    }
+
+    @Test func migrationDoesNotReplaceAnExistingDestination() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("migrate-dest-\(UUID().uuidString)", isDirectory: true)
+        let legacy = directory.appendingPathComponent("old/UserData.json")
+        let destination = directory.appendingPathComponent("group/UserData.json")
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let original = Data("{\"version\":1,\"plans\":[{\"name\":\"Old\"}]}".utf8)
+        let current = Data("{\"version\":1,\"plans\":[{\"name\":\"Current\"}]}".utf8)
+        try original.write(to: legacy)
+        try current.write(to: destination)
+        try UserDataMigration.migrate(from: legacy, to: destination)
+        #expect(try Data(contentsOf: destination) == current)
+        #expect(try Data(contentsOf: legacy) == original)
     }
 
     private func plan(name: String, term: String, course number: String, revision: Int) -> SchedulePlan {

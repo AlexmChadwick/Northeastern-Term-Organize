@@ -293,6 +293,7 @@
 				7A000000000000000000005A /* Sources */,
 				7A000000000000000000005B /* Frameworks */,
 				7A000000000000000000005C /* Resources */,
+				7A0000000000000000000090 /* Sign term-organize-mcp */,
 			);
 			buildRules = (
 			);
@@ -388,6 +389,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		7A0000000000000000000090 /* Sign term-organize-mcp */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Sign term-organize-mcp";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/Tools/sign-term-organize-mcp.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		7A0000000000000000000050 /* Sources */ = {

@@ -253,10 +253,12 @@ enum UserDataFile {
     }
 }
 
-/// Copies the pre-app-group container file into the group container once.
+/// Copies the pre-app-group file into the group container once.
 /// The original is deleted only after the copy's bytes match. A backup named
 /// `UserData.json.premigration.bak` is kept beside the original and is never
 /// overwritten. An unreadable original is left in place.
+///
+/// Only the Mac app calls this. The MCP helper must not.
 enum UserDataMigration {
     static func migrate(from legacy: URL, to destination: URL) throws {
         if legacy.standardizedFileURL.path == destination.standardizedFileURL.path { return }
@@ -306,12 +308,25 @@ enum UserDataMigration {
         try manager.removeItem(at: legacy)
     }
 
+    /// `sandboxHome` is what `homeDirectoryForCurrentUser` returns inside the app
+    /// sandbox: already `…/Containers/<id>/Data`. The old plans file is that
+    /// directory's Application Support. Appending `Library/Containers/…` again
+    /// points at a nested path that is not the file.
+    static func legacyPlanFile(sandboxHome: URL) -> URL {
+        legacyPlanFile(applicationSupport: sandboxHome.appendingPathComponent("Library/Application Support", isDirectory: true))
+    }
+
+    static func legacyPlanFile(applicationSupport: URL) -> URL {
+        applicationSupport.appendingPathComponent("UserData.json")
+    }
+
     #if os(macOS)
-    /// Sandbox container path used before the Mac app group. Not compiled for iOS.
+    /// The sandboxed app's own Application Support. Inside the sandbox,
+    /// `urls(for: .applicationSupportDirectory)` is the container path the app
+    /// wrote before the group existed. Not used by the MCP helper.
     static func legacyContainerURL() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
-            "Library/Containers/\(PlanFileLocation.bundleIdentifier)/Data/Library/Application Support/UserData.json"
-        )
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return legacyPlanFile(applicationSupport: support)
     }
 
     static func migrateLegacyContainerIfNeeded(to destination: URL) {
@@ -326,15 +341,50 @@ enum UserDataMigration {
 /// Where `UserData.json` lives for the MCP process.
 ///
 /// `TERM_ORGANIZE_USER_DATA` overrides the path. Tests set it and never touch a
-/// real plans file. On macOS the override is also what skips the one-time move
-/// out of the old sandbox container.
+/// real plans file. The helper does not migrate. It never reads, moves, or
+/// deletes the app's sandbox container.
 enum PlanFileLocation {
     static let bundleIdentifier = "com.alexchadwick.neuclasssearch"
+    static let pendingMoveMessage = "Open Term Organize once to finish moving your plans"
 
     static func resolve() -> URL {
         if let override = ProcessInfo.processInfo.environment["TERM_ORGANIZE_USER_DATA"], !override.isEmpty {
             return URL(fileURLWithPath: override)
         }
-        return AppPaths.userDataURL
+        #if os(macOS)
+        if let grouped = AppPaths.macGroupUserDataURL() {
+            return grouped
+        }
+        #endif
+        return AppPaths.applicationSupport.appendingPathComponent("UserData.json")
+    }
+
+    /// The app container file, for a stat from the unsandboxed helper. Nil when
+    /// `TERM_ORGANIZE_USER_DATA` is set, so tests never stat a real home.
+    /// Callers may use `fileExists` on this URL and nothing else.
+    static func legacyContainerForStat() -> URL? {
+        if let override = ProcessInfo.processInfo.environment["TERM_ORGANIZE_USER_DATA"], !override.isEmpty {
+            return nil
+        }
+        #if os(macOS)
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+            "Library/Containers/\(bundleIdentifier)/Data/Library/Application Support/UserData.json"
+        )
+        #else
+        return nil
+        #endif
+    }
+
+    /// True when `url` is an existing file. This is a stat. It does not open the file.
+    static func fileExists(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && !isDirectory.boolValue
+    }
+
+    /// The group file is missing and the app container still has a plans file.
+    /// `legacyFile` is only stat'd.
+    static func blockedOnAppMigration(groupFile: URL, legacyFile: URL?) -> Bool {
+        guard let legacyFile, !fileExists(groupFile) else { return false }
+        return fileExists(legacyFile)
     }
 }

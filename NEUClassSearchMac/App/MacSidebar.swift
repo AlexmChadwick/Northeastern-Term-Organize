@@ -74,10 +74,8 @@ struct MacSidebar: View {
     }
 }
 
-/// Schedule names can end in " (edited in app)". A single-line tail truncation
-/// hides that suffix, so the copy looks like the original plan. Middle
-/// truncation keeps the suffix in view, and the badge stays put when the row
-/// is narrower than the name.
+/// The stored name can end in " (edited in app)". The badge is the visible
+/// mark, so that suffix is not also drawn in the row. The stored name is unchanged.
 struct ScheduleNameLabel: View {
     var name: String
     var showsIcon: Bool = true
@@ -92,7 +90,7 @@ struct ScheduleNameLabel: View {
             if showsIcon, let systemImage {
                 Image(systemName: systemImage)
             }
-            Text(name)
+            Text(isAppEdit ? UserDataPlanMerge.sidebarLabel(forStoredName: name) : name)
                 .lineLimit(1)
                 .truncationMode(.middle)
             if isAppEdit {

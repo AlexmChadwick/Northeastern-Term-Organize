@@ -422,6 +422,131 @@ struct MCPToolTests {
 }
 
 @Suite
+struct MCPHelperSafetyTests {
+    private let pending = "Open Term Organize once to finish moving your plans"
+
+    @Test func missingGroupFileWithLegacyContainerIsStorageErrorWithoutReading() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-legacy-\(UUID().uuidString)", isDirectory: true)
+        let plans = root.appendingPathComponent("group/UserData.json")
+        let legacy = root.appendingPathComponent("container/UserData.json")
+        try FileManager.default.createDirectory(at: plans.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let bytes = Data("{\"version\":1,\"plans\":[{\"name\":\"DoNotRead\"}]}".utf8)
+        try bytes.write(to: legacy)
+        #expect(chmod(legacy.path, 0) == 0)
+        defer { chmod(legacy.path, 0o644) }
+
+        let server = TermOrganizeMCPServer(
+            library: MCPFixture.library(), plansURL: plans, readOnly: false, legacyPlanURL: legacy
+        )
+        let calls: [(String, [String: Any])] = [
+            ("list_plans", [:]),
+            ("create_plan", ["name": "Nope", "terms": ["202730"]]),
+            ("delete_plan", ["plan_id": UUID().uuidString, "expected_revision": 1, "confirm": true]),
+            ("rename_plan", ["plan_id": UUID().uuidString, "name": "Nope", "expected_revision": 1]),
+        ]
+        for (name, arguments) in calls {
+            let result = server.call(name: name, arguments: arguments)
+            #expect(result["isError"] as? Bool == true)
+            let error = (result["structuredContent"] as? [String: Any])?["error"] as? [String: Any]
+            #expect(error?["code"] as? String == "storage_error")
+            #expect(error?["message"] as? String == pending)
+        }
+        chmod(legacy.path, 0o644)
+        #expect(try Data(contentsOf: legacy) == bytes)
+        #expect(!FileManager.default.fileExists(atPath: plans.path))
+        #expect(!FileManager.default.fileExists(atPath: legacy.path + ".premigration.bak"))
+        #expect(!FileManager.default.fileExists(atPath: plans.path + ".bak"))
+        #expect(PlanFileLocation.pendingMoveMessage == pending)
+    }
+
+    @Test func missingGroupAndMissingLegacyIsEmpty() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-empty-\(UUID().uuidString)", isDirectory: true)
+        let plans = root.appendingPathComponent("group/UserData.json")
+        let legacy = root.appendingPathComponent("container/UserData.json")
+        let server = TermOrganizeMCPServer(
+            library: MCPFixture.library(), plansURL: plans, readOnly: false, legacyPlanURL: legacy
+        )
+        let result = server.call(name: "list_plans", arguments: [:])
+        #expect(result["isError"] as? Bool != true)
+        let payload = result["structuredContent"] as? [String: Any]
+        let listed = payload?["plans"] as? [[String: Any]] ?? []
+        #expect(listed.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: plans.path))
+    }
+
+    @Test func existingGroupFileIsUsedAndTheLegacyFileIsNotRead() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-group-\(UUID().uuidString)", isDirectory: true)
+        let plans = root.appendingPathComponent("group/UserData.json")
+        let legacy = root.appendingPathComponent("container/UserData.json")
+        try FileManager.default.createDirectory(at: plans.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var stored = UserData()
+        var plan = SchedulePlan(name: "FromGroup", termCode: "202730")
+        plan.revision = 1
+        stored.plans = [plan]
+        try UserDataFile.write(stored, to: plans)
+        let legacyBytes = Data("{\"version\":1,\"plans\":[{\"name\":\"LegacySecret\"}]}".utf8)
+        try legacyBytes.write(to: legacy)
+        #expect(chmod(legacy.path, 0) == 0)
+        defer { chmod(legacy.path, 0o644) }
+
+        let server = TermOrganizeMCPServer(
+            library: MCPFixture.library(), plansURL: plans, readOnly: false, legacyPlanURL: legacy
+        )
+        let result = server.call(name: "list_plans", arguments: [:])
+        #expect(result["isError"] as? Bool != true)
+        let payload = result["structuredContent"] as? [String: Any]
+        let listed = payload?["plans"] as? [[String: Any]] ?? []
+        #expect(listed.count == 1)
+        #expect(listed.first?["name"] as? String == "FromGroup")
+        chmod(legacy.path, 0o644)
+        #expect(try Data(contentsOf: legacy) == legacyBytes)
+        #expect(!FileManager.default.fileExists(atPath: legacy.path + ".premigration.bak"))
+    }
+}
+
+@Suite
+struct MCPCatalogLocationTests {
+    @Test func helperFindsCatalogsBesideItsOwnBundle() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-bundle-\(UUID().uuidString)", isDirectory: true)
+        let resources = root.appendingPathComponent("Term Organize.app/Contents/Resources", isDirectory: true)
+        let executable = root.appendingPathComponent("Term Organize.app/Contents/Helpers/term-organize-mcp")
+        let empty = root.appendingPathComponent("empty-cwd", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        try Data(MCPFixture.jsonCatalog(term: "202710").utf8).write(
+            to: resources.appendingPathComponent(CatalogArchive.fileName(forTerm: "202710"))
+        )
+
+        let found = CatalogLibrary.locateCatalogDirectory(
+            executable: executable, currentDirectory: empty, environment: [:]
+        )
+        #expect(found?.standardizedFileURL.path == resources.standardizedFileURL.path)
+
+        let nested = resources.appendingPathComponent("Catalog", isDirectory: true)
+        try FileManager.default.removeItem(at: resources.appendingPathComponent(CatalogArchive.fileName(forTerm: "202710")))
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try Data(MCPFixture.jsonCatalog(term: "202710").utf8).write(
+            to: nested.appendingPathComponent(CatalogArchive.fileName(forTerm: "202710"))
+        )
+        let nestedFound = CatalogLibrary.locateCatalogDirectory(
+            executable: executable, currentDirectory: empty, environment: [:]
+        )
+        #expect(nestedFound?.standardizedFileURL.path == nested.standardizedFileURL.path)
+
+        let override = root.appendingPathComponent("override-catalogs", isDirectory: true)
+        let overridden = CatalogLibrary.locateCatalogDirectory(
+            executable: executable,
+            currentDirectory: empty,
+            environment: ["TERM_ORGANIZE_CATALOG_DIR": override.path]
+        )
+        #expect(overridden?.standardizedFileURL.path == override.standardizedFileURL.path)
+    }
+}
+
+@Suite
 struct MCPStdioTests {
     @Test func initializeToolsListAndCall() throws {
         let root = URL(fileURLWithPath: #filePath)

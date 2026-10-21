@@ -184,14 +184,25 @@ enum UserDataPlanMerge {
     private static func copied(_ plans: [SchedulePlan], reserved: inout Set<String>) -> [SchedulePlan] {
         guard !plans.isEmpty else { return [] }
         let folder: UUID? = (plans.count > 1 || plans.contains { $0.folderID != nil }) ? UUID() : nil
+        // Schedules that share a folder are one plan. They get one name, not a
+        // " 2" on the second term.
+        let sharedName = uniqueName(for: plans[0].name, reserved: &reserved)
         return plans.map { plan in
             var copy = plan
             copy.id = UUID()
             copy.folderID = folder
-            copy.name = uniqueName(for: plan.name, reserved: &reserved)
+            copy.name = sharedName
             copy.revision = 1
             return copy
         }
+    }
+
+    /// The stored name keeps " (edited in app)". The sidebar badge already says
+    /// that, so the visible label drops the suffix (including a following " 2"
+    /// only when that " 2" is a separate reserved-name collision, which stays).
+    static func sidebarLabel(forStoredName name: String) -> String {
+        guard let range = name.range(of: editedInAppSuffix) else { return name }
+        return name.replacingCharacters(in: range, with: "")
     }
 
     private static func uniqueName(for name: String, reserved: inout Set<String>) -> String {

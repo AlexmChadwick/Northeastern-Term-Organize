@@ -14,8 +14,8 @@ enum AppPaths {
     /// App group shared with the iOS widget extension. The Mac plans file does not use this.
     static let appGroupIdentifier = "group.com.alexchadwick.neuclasssearch"
 
-    /// Mac app and `term-organize-mcp`. Team 832J6JB4V7 must register this group
-    /// for the Mac App ID. The iOS widget group is unchanged.
+    /// Mac app and `term-organize-mcp`. Team signing uses this group. The iOS
+    /// widget group is unchanged.
     static let macPlanAppGroupIdentifier = "832J6JB4V7.com.alexchadwick.termorganize"
 
     static var applicationSupport: URL {
@@ -66,13 +66,11 @@ enum AppPaths {
     ///
     /// On macOS this is `UserData.json` inside the Mac plan app group when that
     /// container is available. A sandboxed build that does not have the group
-    /// (an ad hoc local build) keeps the file in its own Application Support
-    /// directory. The first launch that can see the group copies the old
-    /// container file across and leaves `UserData.json.premigration.bak`.
+    /// keeps the file in its own Application Support directory. This getter does
+    /// not migrate. Only `UserDataStore` (the app) copies the old file.
     static var userDataURL: URL {
         #if os(macOS)
         if let grouped = macGroupUserDataURL() {
-            UserDataMigration.migrateLegacyContainerIfNeeded(to: grouped)
             return grouped
         }
         #endif

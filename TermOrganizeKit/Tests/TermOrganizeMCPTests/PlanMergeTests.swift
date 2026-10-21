@@ -255,6 +255,72 @@ struct PlanMergeTests {
         #expect(try Data(contentsOf: legacy) == original)
     }
 
+    /// Inside the sandbox, home is already `…/Containers/<id>/Data`. The legacy
+    /// file is that directory's Application Support. A nested Containers path
+    /// under the same home is a decoy and must be left alone.
+    @Test func migrationUsesTheSandboxedApplicationSupportFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("sandbox-home-\(UUID().uuidString)", isDirectory: true)
+        let sandboxHome = root.appendingPathComponent("Library/Containers/com.alexchadwick.neuclasssearch/Data", isDirectory: true)
+        let legacy = UserDataMigration.legacyPlanFile(sandboxHome: sandboxHome)
+        let nested = sandboxHome.appendingPathComponent(
+            "Library/Containers/com.alexchadwick.neuclasssearch/Data/Library/Application Support/UserData.json"
+        )
+        let destination = root.appendingPathComponent("group/UserData.json")
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: nested.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let real = Data("{\"version\":1,\"plans\":[{\"name\":\"Real\"}]}".utf8)
+        let decoy = Data("{\"version\":1,\"plans\":[{\"name\":\"Nested\"}]}".utf8)
+        try real.write(to: legacy)
+        try decoy.write(to: nested)
+
+        #expect(containerMentions(in: legacy.path) == 1)
+        #expect(containerMentions(in: nested.path) == 2)
+        #expect(legacy.path.hasSuffix("Data/Library/Application Support/UserData.json"))
+
+        try UserDataMigration.migrate(from: legacy, to: destination)
+        #expect(try Data(contentsOf: destination) == real)
+        #expect(try Data(contentsOf: nested) == decoy)
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        let backup = URL(fileURLWithPath: legacy.path + ".premigration.bak")
+        #expect(try Data(contentsOf: backup) == real)
+    }
+
+    @Test func multiTermConflictCopiesThePlanOnce() {
+        let folder = UUID()
+        var fall = plan(name: "Seed", term: "202710", course: "2500", revision: 1)
+        var spring = plan(name: "Seed", term: "202730", course: "3000", revision: 1)
+        fall.folderID = folder
+        spring.folderID = folder
+        var baseline = UserData()
+        baseline.plans = [fall, spring]
+        var disk = baseline
+        disk.plans[0].courses = [course("2510")]
+        disk.plans[0].revision = 2
+        var local = baseline
+        local.plans[1].courses = [course("3500")]
+        local.plans[1].revision = 2
+
+        let merged = UserDataPlanMerge.merging(baseline: baseline, disk: disk, local: local)
+        let copies = merged.plans.filter { $0.name.contains(UserDataPlanMerge.editedInAppSuffix) }
+        #expect(copies.count == 2)
+        #expect(Set(copies.map(\.name)) == ["Seed\(UserDataPlanMerge.editedInAppSuffix)"])
+        #expect(Set(copies.map(\.folderID)).count == 1)
+        #expect(copies.allSatisfy { $0.folderID != nil && $0.folderID != folder })
+        #expect(!copies.contains { $0.name.contains(" 2") })
+        #expect(merged.plans.filter { $0.name == "Seed" }.count == 2)
+    }
+
+    @Test func sidebarLabelDropsTheEditedInAppSuffix() {
+        let suffix = UserDataPlanMerge.editedInAppSuffix
+        #expect(UserDataPlanMerge.sidebarLabel(forStoredName: "Seed\(suffix)") == "Seed")
+        #expect(UserDataPlanMerge.sidebarLabel(forStoredName: "Seed\(suffix) 2") == "Seed 2")
+        #expect(UserDataPlanMerge.sidebarLabel(forStoredName: "Seed") == "Seed")
+    }
+
+    private func containerMentions(in path: String) -> Int {
+        path.components(separatedBy: "Library/Containers/").count - 1
+    }
+
     private func plan(name: String, term: String, course number: String, revision: Int) -> SchedulePlan {
         var plan = SchedulePlan(name: name, termCode: term)
         plan.courses = [course(number)]

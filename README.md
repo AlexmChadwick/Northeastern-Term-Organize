@@ -233,9 +233,19 @@ cd TermOrganizeKit
 swift build -c release
 ```
 
-The binary is `TermOrganizeKit/.build/release/term-organize-mcp`. Pass `--read-only`,
-or set `TERM_ORGANIZE_MCP_READONLY=1`, to hide every tool that writes a plan.
-`list_plans` and `get_plan` stay available.
+The `swift build` binary is `TermOrganizeKit/.build/release/term-organize-mcp`. Pass
+`--read-only`, or set `TERM_ORGANIZE_MCP_READONLY=1`, to hide every tool that writes a
+plan. `list_plans` and `get_plan` stay available.
+
+A team-signed Mac app embeds the helper here, signed with team `832J6JB4V7` and the
+group-only entitlements in `TermOrganizeKit/term-organize-mcp.entitlements`:
+
+```
+Term Organize.app/Contents/Helpers/term-organize-mcp
+```
+
+Point clients at that embedded binary. User script sandboxing stays on. The Xcode
+target is `term-organize-mcp`. It links the TermOrganizeKit package product.
 
 Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
@@ -243,7 +253,7 @@ Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json
 {
   "mcpServers": {
     "term-organize": {
-      "command": "/ABSOLUTE/PATH/TermOrganizeKit/.build/release/term-organize-mcp"
+      "command": "/ABSOLUTE/PATH/Term Organize.app/Contents/Helpers/term-organize-mcp"
     }
   }
 }
@@ -255,7 +265,7 @@ Cursor (`.cursor/mcp.json` in this repo, or the user MCP config):
 {
   "mcpServers": {
     "term-organize": {
-      "command": "/ABSOLUTE/PATH/TermOrganizeKit/.build/release/term-organize-mcp",
+      "command": "/ABSOLUTE/PATH/Term Organize.app/Contents/Helpers/term-organize-mcp",
       "args": []
     }
   }
@@ -268,15 +278,17 @@ Messages are one JSON object per line. There is no Content-Length header.
 
 On a team-signed Mac, the app and this helper share the app group
 `832J6JB4V7.com.alexchadwick.termorganize` (team `832J6JB4V7`). `UserData.json` lives in
-that group container. A team-signed Xcode build of the Mac app runs
-`Tools/sign-term-organize-mcp.sh`, which signs the helper with the same team and the
-same app group so macOS does not prompt for access. Register the group for the Mac App
-ID first. The iOS widget group is unchanged. The first launch that can see the group
-copies the old sandbox container file across, keeps `UserData.json.premigration.bak`,
-and deletes the original only after the copy matches. See [`docs/MCP.md`](docs/MCP.md).
+that group container. Team signing does not need a separate portal registration step
+for the group. The iOS widget group is unchanged. Only the Mac app copies the old
+Application Support file into the group, keeps `UserData.json.premigration.bak`, and
+deletes the original only after the copy matches. The helper never reads, moves, or
+deletes the app container. If the group file is missing and that container file is
+still there, plan tools return `storage_error` with the message "Open Term Organize
+once to finish moving your plans". See [`docs/MCP.md`](docs/MCP.md).
 If the app still has an unsaved edit when the file changes, the next flush merges plans
-that were edited separately and, when both sides edited the same plan, keeps the file's
-version and a copy named "<plan> (edited in app)".
+that were edited separately. Schedules that share a folder are one plan, so a conflict
+keeps the file's version and one copy named "<plan> (edited in app)". The sidebar
+badge says "App edit" and the visible label drops that suffix. The stored name keeps it.
 
 Run the server tests with `cd TermOrganizeKit && swift test`. They use a temporary
 `UserData.json` and never the real plans file.

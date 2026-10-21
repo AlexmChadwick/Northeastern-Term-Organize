@@ -27,9 +27,12 @@ Build and client snippets are in the README section [Local MCP server](../README
 
 ## Catalog location
 
-The server loads `term-202710.catalog` and `term-202730.catalog` from
-`NEUClassSearch/Resources/Catalog`, walking up from the current directory, the
-executable, and the app bundle. `TERM_ORGANIZE_CATALOG_DIR` overrides that directory.
+The server loads `term-202710.catalog` and `term-202730.catalog` in this order:
+
+1. `TERM_ORGANIZE_CATALOG_DIR`, when it is set.
+2. `Contents/Resources` next to an embedded helper at `Term Organize.app/Contents/Helpers/term-organize-mcp` (a `Catalog` folder under Resources counts too).
+3. `NEUClassSearch/Resources/Catalog`, walking up from the current directory, the executable, and the app bundle. That is how the `swift build` binary finds the repo catalogs.
+
 Any other term code is rejected. The tool error code is `invalid_argument`.
 
 ## Saved plans
@@ -57,31 +60,45 @@ The Mac entitlements are `NEUClassSearchMac/NEUClassSearchMac.entitlements` and
 `NEUClassSearchMac/NEUClassSearchMac-Local.entitlements`. Both list that group and
 keep the app sandbox. The helper entitlement file is
 `TermOrganizeKit/term-organize-mcp.entitlements`. It lists the same group and does
-not turn on the app sandbox, so the helper can still read catalogs from the repo.
-`Tools/sign-term-organize-mcp.sh` signs the helper as
-`com.alexchadwick.termorganize.mcp` with the Mac target's signing identity and copies
-it next to `Term Organize.app` (not inside the bundle). An ad hoc local build
-(`CODE_SIGN_IDENTITY` empty or `-`) skips signing and still builds. A team-signed
-build fails if codesign fails. Register the group for the Mac App ID in the Apple
-developer portal before that team build, or automatic signing fails.
+not turn on the app sandbox.
+
+The helper is an Xcode command-line tool target named `term-organize-mcp`. It links
+the TermOrganizeKit package product and compiles `TermOrganizeKit/Sources/TermOrganizeMCP/main.swift`.
+A Mac app build embeds the signed binary at:
+
+```
+Term Organize.app/Contents/Helpers/term-organize-mcp
+```
+
+It is signed with team `832J6JB4V7` and the group-only entitlements. User script
+sandboxing stays on. A team-signed build does not need a separate portal registration
+step for this group. The bundle id is `com.alexchadwick.termorganize.mcp`.
 
 The iOS app and the widgets keep `group.com.alexchadwick.neuclasssearch`. That
 container is the widget snapshot (`WidgetSchedule.json`) only. It is not the plans file.
 
-The first launch that can see the Mac group copies an existing container file:
+Only the Mac app migrates, and only from `UserDataStore` into the real group file.
+The legacy location is the sandboxed app's own Application Support
+(`FileManager.urls(for: .applicationSupportDirectory)`). Inside the sandbox that is:
 
 ```
 ~/Library/Containers/com.alexchadwick.neuclasssearch/Data/Library/Application Support/UserData.json
 ```
 
-The copy is `UserData.json.premigration.bak` beside the original, and it is not
-overwritten. The original is deleted only after the group copy's bytes match. An
-unreadable original is left in place. If the group file already exists, the old file
-is left alone. `TERM_ORGANIZE_USER_DATA` overrides the path and skips that copy.
-Tests set it and never touch a real plans file.
+`homeDirectoryForCurrentUser` is already the container (`…/Data`), so the path does
+not append `Library/Containers/…` a second time. The copy is
+`UserData.json.premigration.bak` beside the original, and it is not overwritten. The
+original is deleted only after the group copy's bytes match. An unreadable original
+is left in place. If the group file already exists, the old file is left alone.
+`TERM_ORGANIZE_USER_DATA` overrides the path and skips that copy. Tests set it and
+never touch a real plans file.
 
-A sandboxed Mac build that does not have the group (an ad hoc local build) keeps
-`UserData.json` in its own Application Support directory. The next team-signed launch
+The helper never reads, moves, or deletes the app container. If the group file is
+missing and the container file exists, every plan tool returns `storage_error` with
+the message "Open Term Organize once to finish moving your plans". The helper detects
+that file with a stat only. If both files are missing, the plans are empty. A
+sandboxed Mac build that does not have the group keeps `UserData.json` in its own
+Application Support directory and does not migrate. The next team-signed launch
 copies that container file into the group.
 
 Writes take an exclusive lock (`UserData.json.lock`), copy the previous file to
@@ -96,9 +113,11 @@ does not replace a file it could not read. It compares the file with the last lo
 using each plan's revision and a SHA-256 of the bytes (a new modification time counts
 only when the bytes changed too). Plans edited on different sides are combined.
 When both sides edited the same plan, the file's version stays and the app's
-version is saved beside it as "<plan> (edited in app)". An MCP write is not dropped.
-The Mac sidebar and schedule lists middle-truncate that name and show an "App edit"
-badge, so the suffix is not clipped off the end of the row.
+version is saved beside it as "<plan> (edited in app)". Schedules that share a
+folderID are one plan: one copy, one name, and no extra " 2" on a later term. An
+MCP write is not dropped. The stored name keeps " (edited in app)". The Mac sidebar
+and schedule lists show an "App edit" badge and drop that suffix from the visible
+label, then middle-truncate what remains.
 
 ### How an MCP plan maps onto schedules
 

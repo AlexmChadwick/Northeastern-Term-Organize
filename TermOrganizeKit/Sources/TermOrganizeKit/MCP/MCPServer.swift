@@ -28,7 +28,12 @@ public enum TermOrganizeMCP {
         let readOnly = ProcessInfo.processInfo.arguments.contains("--read-only")
             || ProcessInfo.processInfo.environment["TERM_ORGANIZE_MCP_READONLY"] == "1"
         let library = CatalogLibrary.loadBundled()
-        let server = TermOrganizeMCPServer(library: library, plansURL: PlanFileLocation.resolve(), readOnly: readOnly)
+        let server = TermOrganizeMCPServer(
+            library: library,
+            plansURL: PlanFileLocation.resolve(),
+            readOnly: readOnly,
+            legacyPlanURL: PlanFileLocation.legacyContainerForStat()
+        )
         server.serveStandardIO()
     }
 }
@@ -38,11 +43,14 @@ final class TermOrganizeMCPServer {
     let library: CatalogLibrary
     let plansURL: URL
     let readOnly: Bool
+    /// App-container plans file. Stat'd only when the group file is missing. Never read.
+    let legacyPlanURL: URL?
 
-    init(library: CatalogLibrary, plansURL: URL, readOnly: Bool) {
+    init(library: CatalogLibrary, plansURL: URL, readOnly: Bool, legacyPlanURL: URL? = nil) {
         self.library = library
         self.plansURL = plansURL
         self.readOnly = readOnly
+        self.legacyPlanURL = legacyPlanURL
     }
 
     func serveStandardIO() {

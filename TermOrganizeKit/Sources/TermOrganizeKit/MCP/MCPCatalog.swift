@@ -32,26 +32,59 @@ struct CatalogLibrary {
         return CatalogLibrary(indexes: indexes)
     }
 
-    static func locateCatalogDirectory() -> URL? {
-        if let override = ProcessInfo.processInfo.environment["TERM_ORGANIZE_CATALOG_DIR"], !override.isEmpty {
+    static func locateCatalogDirectory(
+        executable: URL? = Bundle.main.executableURL,
+        currentDirectory: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        if let override = environment["TERM_ORGANIZE_CATALOG_DIR"], !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
-        var seeds = [URL(fileURLWithPath: FileManager.default.currentDirectoryPath)]
-        seeds.append(Bundle.main.bundleURL)
-        if let executable = Bundle.main.executableURL {
+        if let executable, let bundled = catalogDirectoryBesideHelper(executable) {
+            return bundled
+        }
+        var seeds = [currentDirectory, Bundle.main.bundleURL]
+        if let executable {
             seeds.append(executable.deletingLastPathComponent())
         }
         let relative = "NEUClassSearch/Resources/Catalog"
+        let marker = CatalogArchive.fileName(forTerm: "202710")
         for seed in seeds {
             var directory = seed
             for _ in 0..<8 {
                 let candidate = directory.appendingPathComponent(relative)
-                let marker = candidate.appendingPathComponent(CatalogArchive.fileName(forTerm: "202710"))
-                if FileManager.default.fileExists(atPath: marker.path) { return candidate }
+                if FileManager.default.fileExists(atPath: candidate.appendingPathComponent(marker).path) {
+                    return candidate
+                }
                 let parent = directory.deletingLastPathComponent()
                 if parent.path == directory.path { break }
                 directory = parent
             }
+        }
+        return nil
+    }
+
+    /// `Term Organize.app/Contents/Helpers/term-organize-mcp` keeps catalogs in
+    /// `Contents/Resources` (or a folder under it).
+    static func catalogDirectoryBesideHelper(_ executable: URL) -> URL? {
+        let resources = executable
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Resources", isDirectory: true)
+        return directoryContainingBundledCatalog(under: resources, depth: 3)
+    }
+
+    private static func directoryContainingBundledCatalog(under root: URL, depth: Int) -> URL? {
+        let marker = root.appendingPathComponent(CatalogArchive.fileName(forTerm: "202710"))
+        if FileManager.default.fileExists(atPath: marker.path) { return root }
+        guard depth > 0 else { return nil }
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+        ) else { return nil }
+        for child in children {
+            let isDirectory = (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            guard isDirectory else { continue }
+            if let found = directoryContainingBundledCatalog(under: child, depth: depth - 1) { return found }
         }
         return nil
     }

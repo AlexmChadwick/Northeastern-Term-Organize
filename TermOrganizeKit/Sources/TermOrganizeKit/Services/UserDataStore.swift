@@ -41,6 +41,13 @@ final class UserDataStore {
     @ObservationIgnored private(set) var isApplyingRemoteChanges = false
 
     init(fileURL: URL = AppPaths.userDataURL) {
+        #if os(macOS)
+        // Only the app migrates, and only into the real group file. A sample or
+        // test store passes some other URL and must not touch the container.
+        if AppPaths.macGroupUserDataURL()?.path == fileURL.path {
+            UserDataMigration.migrateLegacyContainerIfNeeded(to: fileURL)
+        }
+        #endif
         self.fileURL = fileURL
         let stored: UserData
         switch UserDataFile.inspect(at: fileURL) {

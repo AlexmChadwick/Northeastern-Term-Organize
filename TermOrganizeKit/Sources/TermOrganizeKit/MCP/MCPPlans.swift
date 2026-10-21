@@ -83,6 +83,7 @@ extension TermOrganizeMCPServer {
     /// is a storage error, including permission failures, malformed JSON, and a
     /// newer file version. It is never reported as zero plans.
     func storedPlans() throws -> UserData {
+        try ensurePlansStorage()
         switch UserDataFile.inspect(at: plansURL) {
         case .missing:
             return UserData()
@@ -100,7 +101,7 @@ extension TermOrganizeMCPServer {
         let requested = try termStringList(arguments["terms"])
         let folder = UUID()
         var created: PlanGroup?
-        try UserDataFile.modify(at: plansURL) { data in
+        try modifyPlans { data in
             let codes = requested.isEmpty
                 ? [CatalogLibrary.allowedTermCodes.first { library.index(for: $0) != nil } ?? "202730"]
                 : requested
@@ -253,7 +254,7 @@ extension TermOrganizeMCPServer {
         let id = try planID(arguments)
         let expected = try expectedRevision(arguments)
         var removed = false
-        try UserDataFile.modify(at: plansURL) { data in
+        try modifyPlans { data in
             let groups = PlanGroup.groups(in: data.plans)
             guard let group = groups.first(where: { $0.id == id }) else {
                 throw MCPToolError(code: "unknown_plan", message: "No saved plan \(id.uuidString).")
@@ -266,9 +267,23 @@ extension TermOrganizeMCPServer {
         return ["deleted": removed, "plan_id": id.uuidString]
     }
 
+    /// The helper never opens the app container. A missing group file is empty
+    /// only when that container file is absent too. Otherwise the app still has
+    /// to copy it.
+    private func ensurePlansStorage() throws {
+        if PlanFileLocation.blockedOnAppMigration(groupFile: plansURL, legacyFile: legacyPlanURL) {
+            throw MCPToolError(code: "storage_error", message: PlanFileLocation.pendingMoveMessage)
+        }
+    }
+
+    private func modifyPlans(_ change: (inout UserData) throws -> Void) throws {
+        try ensurePlansStorage()
+        try UserDataFile.modify(at: plansURL, change)
+    }
+
     private func mutate(id: UUID, expected: Int, _ change: (inout PlanGroup) throws -> Void) throws -> [String: Any] {
         var updated: PlanGroup?
-        try UserDataFile.modify(at: plansURL) { data in
+        try modifyPlans { data in
             var groups = PlanGroup.groups(in: data.plans)
             guard let index = groups.firstIndex(where: { $0.id == id }) else {
                 throw MCPToolError(code: "unknown_plan", message: "No saved plan \(id.uuidString).")

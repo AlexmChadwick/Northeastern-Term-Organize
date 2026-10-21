@@ -137,7 +137,10 @@ struct SectionPickerSheet: View {
             }
         }
         .safeAreaBar(edge: .bottom) {
-            bottomBar(plan: plan, entry: entry, current: current, highlighted: highlighted)
+            bottomBar(
+                plan: plan, entry: entry, current: current, highlighted: highlighted,
+                canClear: !resolved.entries.contains { $0.key == entry.key && $0.id != entry.id }
+            )
         }
         .onAppear {
             if highlightedCRN == nil { highlightedCRN = current?.crn }
@@ -279,7 +282,7 @@ struct SectionPickerSheet: View {
 
     // MARK: Bottom bar
 
-    private func bottomBar(plan: SchedulePlan, entry: ResolvedPlan.Entry, current: CourseSection?, highlighted: CourseSection?) -> some View {
+    private func bottomBar(plan: SchedulePlan, entry: ResolvedPlan.Entry, current: CourseSection?, highlighted: CourseSection?, canClear: Bool) -> some View {
         GlassEffectContainer(spacing: 10) {
             VStack(spacing: 10) {
                 if let highlighted {
@@ -309,7 +312,6 @@ struct SectionPickerSheet: View {
                     .disabled(highlighted == nil || highlighted?.crn == current?.crn)
 
                     if current != nil {
-                        let canClear = !resolved.entries.contains { $0.key == entry.key && $0.id != entry.id }
                         Button {
                             clear(entry: entry)
                         } label: {

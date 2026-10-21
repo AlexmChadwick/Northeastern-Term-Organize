@@ -206,7 +206,7 @@ extension MCPTool {
         },
         MCPTool(
             name: "suggest_schedule",
-            description: "Conflict-free section combinations for the requested courses, best first. A course with a crn uses only that section. Constraints can keep classes after a time, before a time, or off certain days.",
+            description: "Conflict-free section combinations for the requested courses, best first. A course with a crn uses only that section. Two entries with the same subject and number and different crns stay two courses. Constraints can keep classes after a time, before a time, or off certain days.",
             properties: [
                 "term": stringSchema,
                 "courses": ["type": "array", "items": [

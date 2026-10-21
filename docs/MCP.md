@@ -22,6 +22,7 @@ Build and client snippets are in the README section [Local MCP server](../README
 - create_plan {name, terms?: ["202710","202730"]}, a list of term strings.
 - reorganize_plan accepts either {plan_id} or {plan:{terms:[{term, courses:[{subject, number, crn?}]}]}}. It returns {moves:[{subject, number, crn?, from_term, to_term, reason}], unresolved:[{subject, number, crn?, reason}], plan:{...}}.
 - Reorganize rule, the same everywhere: a course moves only into a term the plan already has. The target term's bundled catalog must offer the course, prerequisite order within the plan must be kept, and it never adds a semester. An unpinned course is offered in a term when that term has at least one section of its subject and number. A course with a crn is offered only when that CRN is a section of it in that term. Two rows with different CRNs are different sections, even when they share a subject and number. Two unpinned rows of the same number collapse to the first.
+- Duplicate course numbers: a saved term may contain the same subject and number more than once only when every row has its own crn and the crns differ. add_course without a crn does not create a second row. The same crn twice is not stored. set_section changes one row and does not clear another row's crn. suggest_schedule does not merge two such rows.
 - Shared fixture: tests/fixtures/mcp-reorganize-fixture.json. It is a plan with CS 4805, CS 2535, CS 2700, CS 4130 and CS 2701 in Fall 2026, plus an empty Spring 2027. Each server must have a test that checks its output against the expected moves. Work out the expected result from the bundled 202730 catalog and the prereqs, and write it into the fixture. Include in your report the per-course reasoning: offered in 202730 yes/no, and prereq status.
 - Storage failures: if the plan file exists but can't be read (permission denied, sandbox, malformed JSON, unknown newer version), every plan tool returns storage_error with the path and reason. NEVER treat a read failure as an empty plan list, and NEVER write over a file you couldn't read. A missing file is the only case that counts as empty.
 
@@ -223,7 +224,8 @@ sections in that term returns `not_found` (it has no sections in that bundled te
 When a course includes `crn`, every combination uses that section. The tool does
 not replace it with another section of the same subject and number, even when the
 pin conflicts or fails a constraint. A `crn` that is not a section of that course
-in the term returns `not_found`.
+in the term returns `not_found`. Two entries with the same subject and number and
+different `crn` values are two courses. The generator does not merge them.
 
 ```json
 {
@@ -349,9 +351,11 @@ Required: `plan_id` (UUID). Read-only.
 }
 ```
 
-`crn` and `sections` describe the sections chosen on that course. `sections` is empty
-when no CRN is chosen. `not_offered` lists courses that have no sections in that
-bundled term. `clashes` lists chosen sections whose meetings overlap.
+Each object in `courses` is one row. `crn` is that row's chosen section, and
+`sections` is that section. Two rows may share a subject and number when their
+`crn` values differ. `sections` is empty when no CRN is chosen. `not_offered`
+lists courses that have no sections in that bundled term. `clashes` lists chosen
+sections whose meetings overlap.
 
 `create_plan`, `rename_plan`, `add_course`, `remove_course`, `move_course`, and
 `set_section` return this same object.
@@ -373,6 +377,12 @@ Required: `plan_id`, `name`, `expected_revision`.
 Required: `plan_id`, `term`, `subject`, `number`, `expected_revision`. Optional: `crn`.
 Creates the term on the plan if it is not there yet.
 
+The same subject and number may be added again only when `crn` is set, every row
+of that number already has its own `crn`, and the new `crn` is different. Without
+`crn`, a number already in the term is left as it is. Passing a `crn` when the
+only row has none stores that `crn` on the existing row and does not add a second
+row. The same `crn` twice does not add a row.
+
 ### `remove_course`
 
 Required: `plan_id`, `term`, `subject`, `number`, `expected_revision`. Destructive.
@@ -383,21 +393,30 @@ term is kept so the plan id still resolves.
 
 Required: `plan_id`, `subject`, `number`, `from_term`, `to_term`, `expected_revision`.
 The course must already be in `from_term`. A chosen CRN is kept only when that same
-CRN is a section of the course in `to_term`.
+CRN is a section of the course in `to_term`. This tool still moves every row of
+that subject and number together. When more than one CRN is stored, the last one
+that is also offered in `to_term` is the one it keeps.
 
 ### `set_section`
 
 Required: `plan_id`, `term`, `subject`, `number`, `crn`, `expected_revision`.
-The course must already be in that term. Replaces any CRN previously chosen for it.
+Optional: `from_crn`.
+
+The course must already be in that term. This changes one row. When the term has
+one row of that subject and number, `from_crn` can be omitted and the call
+replaces that row's CRN. When it has more than one, `from_crn` names the row to
+change. Omitting it in that case is `invalid_argument` and nothing is written.
+A `crn` already stored on another row is refused, and the other row keeps its
+CRN. `add_course` is what creates a second row.
 
 ### `apply_reorganize`
 
 Required: `plan_id`, `expected_revision`. Destructive. Runs `reorganize_plan` on the
 saved courses and writes the result. A chosen CRN is kept when `section(crn:)` in
 that term is a course that remains there. It is not replaced with a different
-section of the same subject and number. `set_section` is the tool that changes a
-pin. The response is the `get_plan` object plus `moves` and `unresolved` from
-`reorganize_plan`.
+section of the same subject and number. Two rows with different CRNs stay two
+rows. `set_section` is the tool that changes a pin. The response is the
+`get_plan` object plus `moves` and `unresolved` from `reorganize_plan`.
 
 ### `delete_plan`
 

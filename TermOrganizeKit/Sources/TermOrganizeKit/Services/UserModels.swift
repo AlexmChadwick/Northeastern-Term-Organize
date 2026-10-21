@@ -68,9 +68,23 @@ struct PlanCourse: Codable, Hashable, Identifiable, Sendable {
     var isRequired = true
     /// Sections the user never wants (hidden from generation).
     var excludedCRNs: Set<String> = []
+    /// The section the user chose for this row. Two rows may share a subject
+    /// and number only when each has its own CRN. Nil on plans saved before
+    /// the field existed, and on a row that has not had a section chosen.
+    var pinnedCRN: String?
     /// Index into `CourseColor.palette`.
     var colorIndex: Int
     var id: CourseKey { key }
+}
+
+/// What `SchedulePlan.include` did with one course row.
+enum PlanCourseAdmission: Equatable, Sendable {
+    /// A new row was appended.
+    case added
+    /// The CRN was stored on a row that did not have one yet.
+    case pinnedExisting
+    /// The number was already present, or this CRN was already stored.
+    case alreadyPresent
 }
 
 /// A named schedule for one term (SearchNEU calls these "plans").
@@ -79,8 +93,9 @@ struct SchedulePlan: Codable, Hashable, Identifiable, Sendable {
     var name: String
     var termCode: String
     var courses: [PlanCourse] = []
-    /// The chosen section for each course (one CRN per course, possibly more
-    /// for linked components). This is the schedule shown on the calendar.
+    /// Chosen section CRNs. A row with `pinnedCRN` keeps that CRN here. A
+    /// second row of the same subject and number keeps a different CRN.
+    /// Linked components of one row can still add another CRN.
     var selectedCRNs: [String] = []
     var filters = ScheduleFilters()
     /// "Your ideal week": what the student wants the generated schedules to look like. Nil until they
@@ -102,6 +117,62 @@ struct SchedulePlan: Codable, Hashable, Identifiable, Sendable {
     func contains(_ key: CourseKey) -> Bool { courses.contains { $0.key == key } }
 
     func course(_ key: CourseKey) -> PlanCourse? { courses.first { $0.key == key } }
+
+    /// Adds a row, or pins the one unpinned row of `key`.
+    ///
+    /// A second row is created only when `crn` is set, every existing row of
+    /// `key` already has a different pin, and no row already stores `crn`.
+    /// A missing CRN never creates a second row. The same CRN twice does not.
+    /// `courseCRNs` is every section CRN of `key` in this term. An unpinned
+    /// row that already has one of those CRNs in `selectedCRNs` is treated as
+    /// pinned to that CRN, so a different CRN can be added beside it.
+    @discardableResult
+    mutating func include(key: CourseKey, crn: String?, courseCRNs: Set<String>, required: Bool = true) -> PlanCourseAdmission {
+        let pin = crn?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let chosen = (pin?.isEmpty == false) ? pin : nil
+        if chosen == nil {
+            guard !contains(key) else { return .alreadyPresent }
+            courses.append(PlanCourse(key: key, isRequired: required, colorIndex: nextColorIndex))
+            return .added
+        }
+        let crn = chosen!
+        if courses.contains(where: { $0.pinnedCRN == crn }) { return .alreadyPresent }
+
+        let rows = courses.indices.filter { courses[$0].key == key }
+        if rows.isEmpty {
+            var course = PlanCourse(key: key, isRequired: required, colorIndex: nextColorIndex)
+            course.pinnedCRN = crn
+            courses.append(course)
+            if !selectedCRNs.contains(crn) { selectedCRNs.append(crn) }
+            return .added
+        }
+
+        if rows.count == 1, courses[rows[0]].pinnedCRN == nil {
+            let owned = selectedCRNs.filter { courseCRNs.contains($0) }
+            if owned.contains(crn) {
+                courses[rows[0]].pinnedCRN = crn
+                return .alreadyPresent
+            }
+            if let first = owned.first {
+                courses[rows[0]].pinnedCRN = first
+            }
+        }
+
+        if let open = courses.indices.first(where: { courses[$0].key == key && (courses[$0].pinnedCRN?.isEmpty != false) }) {
+            courses[open].pinnedCRN = crn
+            if !courseCRNs.isEmpty {
+                selectedCRNs.removeAll { courseCRNs.contains($0) && $0 != crn }
+            }
+            if !selectedCRNs.contains(crn) { selectedCRNs.append(crn) }
+            return .pinnedExisting
+        }
+
+        var course = PlanCourse(key: key, isRequired: required, colorIndex: nextColorIndex)
+        course.pinnedCRN = crn
+        courses.append(course)
+        if !selectedCRNs.contains(crn) { selectedCRNs.append(crn) }
+        return .added
+    }
 
     /// The next unused palette index.
     var nextColorIndex: Int {

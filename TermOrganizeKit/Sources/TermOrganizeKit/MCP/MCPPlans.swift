@@ -28,7 +28,7 @@ extension MCPTool {
         ], required: ["plan_id", "name", "expected_revision"], readOnly: false) { arguments, server in
             try server.renamePlan(arguments)
         },
-        MCPTool(name: "add_course", description: "Add a catalog course to a term of a saved plan. crn is optional. Rejects unknown courses and CRNs.", properties: [
+        MCPTool(name: "add_course", description: "Add a catalog course to a term of a saved plan. The same subject and number can be added again only when crn is set and differs from every row already stored. Without crn, a number already in the term is left unchanged. The same crn twice is not added.", properties: [
             "plan_id": stringSchema, "term": stringSchema, "subject": stringSchema, "number": stringSchema,
             "crn": stringSchema, "expected_revision": intSchema,
         ], required: ["plan_id", "term", "subject", "number", "expected_revision"], readOnly: false) { arguments, server in
@@ -45,9 +45,9 @@ extension MCPTool {
         ], required: ["plan_id", "subject", "number", "from_term", "to_term", "expected_revision"], readOnly: false) { arguments, server in
             try server.moveCourse(arguments)
         },
-        MCPTool(name: "set_section", description: "Choose the CRN for a course already in a term of a saved plan.", properties: [
+        MCPTool(name: "set_section", description: "Choose the CRN for one row of a course already in a term. When that subject and number appears more than once, from_crn names the row to change. A CRN already stored on another row is refused, and other rows keep their CRNs.", properties: [
             "plan_id": stringSchema, "term": stringSchema, "subject": stringSchema, "number": stringSchema,
-            "crn": stringSchema, "expected_revision": intSchema,
+            "crn": stringSchema, "from_crn": stringSchema, "expected_revision": intSchema,
         ], required: ["plan_id", "term", "subject", "number", "crn", "expected_revision"], readOnly: false) { arguments, server in
             try server.setSection(arguments)
         },
@@ -133,15 +133,13 @@ extension TermOrganizeMCPServer {
         let crn = stringArg(arguments, "crn")
         try validateCourse(key, term: term, crn: crn)
         let expected = try expectedRevision(arguments)
+        let courseCRNs = Set((library.index(for: term)?.sections(for: key) ?? []).map(\.crn))
         return try mutate(id: id, expected: expected) { group in
             if let index = group.plans.firstIndex(where: { $0.termCode == term }) {
-                if !group.plans[index].contains(key) {
-                    group.plans[index].courses.append(PlanCourse(key: key, colorIndex: group.plans[index].nextColorIndex))
-                }
-                if let crn { try select(crn, for: key, in: &group.plans[index], term: term) }
+                group.plans[index].include(key: key, crn: crn, courseCRNs: courseCRNs)
             } else {
-                var plan = newSchedule(name: group.plans.first?.name ?? "Plan", term: term, folder: group.id, courses: [key], data: UserData())
-                if let crn { try select(crn, for: key, in: &plan, term: term) }
+                var plan = newSchedule(name: group.plans.first?.name ?? "Plan", term: term, folder: group.id, courses: [], data: UserData())
+                plan.include(key: key, crn: crn, courseCRNs: courseCRNs)
                 group.plans.append(plan)
             }
         }
@@ -204,13 +202,14 @@ extension TermOrganizeMCPServer {
         let term = try termCode(arguments, key: "term")
         let key = try courseKey(arguments)
         let crn = stringArg(arguments, "crn") ?? ""
+        let fromCRN = stringArg(arguments, "from_crn")
         try validateCourse(key, term: term, crn: crn)
         let expected = try expectedRevision(arguments)
         return try mutate(id: id, expected: expected) { group in
             guard let index = group.plans.firstIndex(where: { $0.termCode == term && $0.contains(key) }) else {
                 throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(term) of this plan.")
             }
-            try select(crn, for: key, in: &group.plans[index], term: term)
+            try assignSection(crn, from: fromCRN, for: key, in: &group.plans[index], term: term)
         }
     }
 
@@ -228,20 +227,49 @@ extension TermOrganizeMCPServer {
             var rebuilt: [SchedulePlan] = []
             for row in planObject["terms"] as? [[String: Any]] ?? [] {
                 let code = stringArg(row, "term") ?? ""
-                let keys = courseList(row["courses"])
+                let entries = courseEntries(row["courses"])
                 var plan = group.plans.first { $0.termCode == code } ?? newSchedule(name: name, term: code, folder: group.id, courses: [], data: UserData())
                 plan.name = name
                 plan.folderID = group.id
-                plan.courses = keys.map { key in
-                    plan.course(key) ?? PlanCourse(key: key, colorIndex: plan.nextColorIndex)
+                // One output row is one plan row. Two different CRNs of the same
+                // number stay two rows. Copy the stored row when it already has
+                // that pin, so color and exclusions survive. Do not call select.
+                var used = Set<Int>()
+                var courses: [PlanCourse] = []
+                for entry in entries {
+                    let match = plan.courses.indices.first { index in
+                        guard !used.contains(index), plan.courses[index].key == entry.key else { return false }
+                        if let crn = entry.crn {
+                            if plan.courses[index].pinnedCRN == crn { return true }
+                            // A plan saved before pinnedCRN stored the choice only in selectedCRNs.
+                            let claimed = Set(plan.courses.compactMap(\.pinnedCRN))
+                            return plan.courses[index].pinnedCRN == nil && plan.selectedCRNs.contains(crn) && !claimed.contains(crn)
+                        }
+                        return plan.courses[index].pinnedCRN?.isEmpty != false
+                    }
+                    var course: PlanCourse
+                    if let match {
+                        used.insert(match)
+                        course = plan.courses[match]
+                    } else {
+                        course = PlanCourse(key: entry.key, colorIndex: courses.count % CourseColorPalette.count)
+                    }
+                    if let crn = entry.crn { course.pinnedCRN = crn }
+                    courses.append(course)
                 }
+                plan.courses = courses
                 // Keep a chosen CRN only when that section is still one of the courses
                 // in this term. Look the section up by CRN. Do not substitute another
-                // section of the same subject and number, and do not call select.
-                let remaining = Set(keys)
+                // section of the same subject and number.
+                let remaining = Set(entries.map(\.key))
                 plan.selectedCRNs = plan.selectedCRNs.filter { crn in
                     guard let section = library.index(for: code)?.section(crn: crn) else { return false }
                     return remaining.contains(section.courseKey)
+                }
+                for entry in entries {
+                    if let crn = entry.crn, !plan.selectedCRNs.contains(crn) {
+                        plan.selectedCRNs.append(crn)
+                    }
                 }
                 rebuilt.append(plan)
             }
@@ -331,10 +359,23 @@ extension TermOrganizeMCPServer {
                 if sections.isEmpty {
                     notOffered.append(["term": plan.termCode, "subject": course.key.subject, "number": course.key.number])
                 }
-                let selected = sections.filter { plan.selectedCRNs.contains($0.crn) }
-                if let crn = selected.first?.crn { row["crn"] = crn }
-                row["sections"] = selected.map { sectionJSON($0) }
-                chosen.append(contentsOf: selected)
+                // Each row reports its own pin. The first selected section of
+                // the number is only a fallback for a single unpinned row.
+                let siblingPins = Set(plan.courses.compactMap { other -> String? in
+                    guard other.key == course.key, let pin = other.pinnedCRN, !pin.isEmpty, pin != course.pinnedCRN else { return nil }
+                    return pin
+                })
+                let own: [CourseSection]
+                if let pin = course.pinnedCRN, !pin.isEmpty {
+                    row["crn"] = pin
+                    own = sections.filter { $0.crn == pin }
+                } else {
+                    let selected = sections.filter { plan.selectedCRNs.contains($0.crn) && !siblingPins.contains($0.crn) }
+                    if let crn = selected.first?.crn { row["crn"] = crn }
+                    own = selected
+                }
+                row["sections"] = own.map { sectionJSON($0) }
+                chosen.append(contentsOf: own)
                 courses.append(row)
             }
             for left in 0..<chosen.count {
@@ -394,11 +435,53 @@ extension TermOrganizeMCPServer {
         }
     }
 
+    /// `move_course` still moves every row of a subject and number together.
+    /// The last CRN that is also offered in the destination is the one it keeps.
     private func select(_ crn: String, for key: CourseKey, in plan: inout SchedulePlan, term: String) throws {
         guard let index = library.index(for: term) else { return }
         let courseCRNs = Set(index.sections(for: key).map(\.crn))
         plan.selectedCRNs.removeAll { courseCRNs.contains($0) }
         plan.selectedCRNs.append(crn)
+    }
+
+    /// Replaces the pin on one row. Other rows of the same number keep theirs.
+    /// `from` is required when more than one row of `key` is already in the plan.
+    private func assignSection(_ crn: String, from: String?, for key: CourseKey, in plan: inout SchedulePlan, term: String) throws {
+        let courseCRNs = Set((library.index(for: term)?.sections(for: key) ?? []).map(\.crn))
+        let matches = plan.courses.indices.filter { plan.courses[$0].key == key }
+        guard !matches.isEmpty else {
+            throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(term) of this plan.")
+        }
+        let target: Int
+        if let from {
+            guard let index = matches.first(where: { rowMatches($0, crn: from, in: plan) }) else {
+                throw MCPToolError(code: "unknown_crn", message: "CRN \(from) is not a chosen section of \(key.description) in this term.")
+            }
+            target = index
+        } else if matches.count == 1 {
+            target = matches[0]
+        } else {
+            throw MCPToolError(code: "invalid_argument", message: "\(key.description) is in this term more than once. Pass from_crn to name the section to replace.")
+        }
+        if plan.courses.contains(where: { $0.pinnedCRN == crn && plan.courses[target].pinnedCRN != crn }) {
+            throw MCPToolError(code: "invalid_argument", message: "CRN \(crn) is already chosen for another \(key.description) in this term.")
+        }
+        let previous = plan.courses[target].pinnedCRN
+        if previous == crn { return }
+        plan.courses[target].pinnedCRN = crn
+        let reserved = Set(plan.courses.compactMap { pin in pin.pinnedCRN }.filter { !$0.isEmpty })
+        plan.selectedCRNs.removeAll { candidate in
+            guard courseCRNs.contains(candidate), candidate != crn, !reserved.contains(candidate) else { return false }
+            if candidate == previous { return true }
+            return previous == nil
+        }
+        if !plan.selectedCRNs.contains(crn) { plan.selectedCRNs.append(crn) }
+    }
+
+    private func rowMatches(_ index: Int, crn: String, in plan: SchedulePlan) -> Bool {
+        if plan.courses[index].pinnedCRN == crn { return true }
+        let claimed = Set(plan.courses.compactMap(\.pinnedCRN))
+        return plan.courses[index].pinnedCRN == nil && plan.selectedCRNs.contains(crn) && !claimed.contains(crn)
     }
 }
 

@@ -332,6 +332,84 @@ struct MCPToolTests {
         #expect(bad["isError"] as? Bool == true)
     }
 
+    /// The same subject and number is two rows only when each row has its own CRN.
+    @Test func duplicateCourseNumbersNeedDistinctCRNs() throws {
+        let id = try planID(try call("create_plan", ["name": "Topics", "terms": ["202730"]]))
+        let plain = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "expected_revision": 1,
+        ])
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "expected_revision": 2,
+        ])
+        let plainCourses = ((plain["terms"] as? [[String: Any]])?.first?["courses"] as? [[String: Any]]) ?? []
+        let stillPlain = try call("get_plan", ["plan_id": id])
+        let plainAfter = ((stillPlain["terms"] as? [[String: Any]])?.first?["courses"] as? [[String: Any]]) ?? []
+        #expect(plainCourses.count == 1)
+        #expect(plainAfter.count == 1)
+        #expect(plainAfter.first?["crn"] == nil)
+
+        _ = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "expected_revision": 3,
+        ])
+        let pinned = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "11111", "expected_revision": 4,
+        ])
+        let oneTopic = courses(in: pinned, term: "202730").filter { $0["number"] as? String == "4973" }
+        #expect(oneTopic.count == 1)
+        #expect(oneTopic.first?["crn"] as? String == "11111")
+
+        let same = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "11111", "expected_revision": 5,
+        ])
+        #expect(courses(in: same, term: "202730").filter { $0["number"] as? String == "4973" }.count == 1)
+
+        let both = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "22222", "expected_revision": 6,
+        ])
+        let topics = courses(in: both, term: "202730").filter { $0["number"] as? String == "4973" }
+        #expect(Set(topics.compactMap { $0["crn"] as? String }) == ["11111", "22222"])
+
+        let ambiguous = server.call(name: "set_section", arguments: [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "33333", "expected_revision": 7,
+        ])
+        #expect(ambiguous["isError"] as? Bool == true)
+        let untouched = try call("get_plan", ["plan_id": id])
+        #expect(untouched["revision"] as? Int == 7)
+        #expect(Set(courses(in: untouched, term: "202730").filter { $0["number"] as? String == "4973" }.compactMap { $0["crn"] as? String }) == ["11111", "22222"])
+
+        let changed = try call("set_section", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973",
+            "crn": "33333", "from_crn": "22222", "expected_revision": 7,
+        ])
+        #expect(Set(courses(in: changed, term: "202730").filter { $0["number"] as? String == "4973" }.compactMap { $0["crn"] as? String }) == ["11111", "33333"])
+
+        let stolen = server.call(name: "set_section", arguments: [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973",
+            "crn": "11111", "from_crn": "33333", "expected_revision": 8,
+        ])
+        #expect(stolen["isError"] as? Bool == true)
+        let kept = try call("get_plan", ["plan_id": id])
+        #expect(kept["revision"] as? Int == 8)
+        #expect(Set(courses(in: kept, term: "202730").filter { $0["number"] as? String == "4973" }.compactMap { $0["crn"] as? String }) == ["11111", "33333"])
+
+        let suggested = try call("suggest_schedule", [
+            "term": "202730",
+            "courses": [
+                ["subject": "CS", "number": "4973", "crn": "11111"],
+                ["subject": "CS", "number": "4973", "crn": "33333"],
+            ],
+        ])
+        let schedules = suggested["schedules"] as? [[String: Any]] ?? []
+        let crns = schedules.first?["crns"] as? [String] ?? []
+        #expect(Set(crns) == ["11111", "33333"])
+        #expect(crns.count == 2)
+
+        let applied = try call("apply_reorganize", ["plan_id": id, "expected_revision": 8])
+        let appliedTopics = courses(in: applied, term: "202730").filter { $0["number"] as? String == "4973" }
+        #expect(Set(appliedTopics.compactMap { $0["crn"] as? String }) == ["11111", "33333"])
+        #expect(appliedTopics.count == 2)
+    }
+
     @Test func revisionConflictLeavesTheFileAlone() throws {
         let id = try planID(try call("create_plan", ["name": "Spring", "terms": ["202730"]]))
         _ = try call("rename_plan", ["plan_id": id, "name": "First", "expected_revision": 1])
@@ -520,6 +598,12 @@ struct MCPToolTests {
 
     private func planID(_ payload: [String: Any]) throws -> String {
         try #require(payload["id"] as? String)
+    }
+
+    private func courses(in payload: [String: Any], term: String) -> [[String: Any]] {
+        let terms = payload["terms"] as? [[String: Any]] ?? []
+        let row = terms.first { $0["term"] as? String == term }
+        return row?["courses"] as? [[String: Any]] ?? []
     }
 }
 

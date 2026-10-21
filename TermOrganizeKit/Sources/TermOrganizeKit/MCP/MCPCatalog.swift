@@ -426,10 +426,6 @@ func courseKey(_ arguments: [String: Any]) throws -> CourseKey {
     return CourseKey(subject: subject, number: number)
 }
 
-func courseList(_ raw: Any?) -> [CourseKey] {
-    courseEntries(raw).map(\.key)
-}
-
 /// One course row. `crn` is set only when the caller picked a section.
 struct ReorganizeCourse: Hashable {
     var key: CourseKey

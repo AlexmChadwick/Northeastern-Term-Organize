@@ -74,6 +74,29 @@ struct CoreModelTests {
         #expect(Instructor(name: "Staff", primary: false).displayName == "Staff")
     }
 
+    @Test func instructorEmailsStayOnNortheasternDomains() {
+        func faculty(_ email: String) -> BannerFaculty {
+            BannerFaculty(displayName: "Ada, Lovelace", emailAddress: email, primaryIndicator: true)
+        }
+        #expect(faculty("a.lovelace@northeastern.edu").toInstructor()?.email == "a.lovelace@northeastern.edu")
+        #expect(faculty("Ada@NEU.edu").toInstructor()?.email == "Ada@NEU.edu")
+        #expect(faculty("  ada@northeastern.edu  ").toInstructor()?.email == "ada@northeastern.edu")
+        #expect(faculty("Ada Lovelace <ada@northeastern.edu>").toInstructor()?.email == "ada@northeastern.edu")
+        // Subdomains are not the institutional domains, and husky.neu.edu is a student domain.
+        #expect(faculty("ada@husky.neu.edu").toInstructor()?.email == nil)
+        #expect(faculty("ada@coe.neu.edu").toInstructor()?.email == nil)
+        #expect(faculty("ada@ece.northeastern.edu").toInstructor()?.email == nil)
+        #expect(faculty("ada@gmail.com").toInstructor()?.email == nil)
+        #expect(faculty("not-an-email").toInstructor()?.email == nil)
+        #expect(faculty("   ").toInstructor()?.email == nil)
+        #expect(faculty("ada@gmail.com").toInstructor()?.name == "Ada, Lovelace")
+        // One field can list a personal address beside a Northeastern one.
+        #expect(faculty("ada@gmail.com ada@northeastern.edu").toInstructor()?.email == "ada@northeastern.edu")
+        #expect(faculty("ada@kent.edu ada@neu.edu").toInstructor()?.email == "ada@neu.edu")
+        #expect(faculty("a@gmail.com b@kent.edu").toInstructor()?.email == nil)
+        #expect(faculty("a@northeastern.edu b@neu.edu").toInstructor()?.email == "a@northeastern.edu b@neu.edu")
+    }
+
     @Test func catalogArchiveRoundTrip() throws {
         let term = Term(code: "202710", bannerDescription: "Fall 2026 Semester")
         let course = Course(subject: "CS", number: "3000", title: "Algorithms and Data", description: "Introduces…",

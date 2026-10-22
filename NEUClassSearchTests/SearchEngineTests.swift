@@ -25,6 +25,43 @@ struct SearchEngineTests {
         return SearchEngine.search(SearchQuery(text: text, filters: filters), in: index).results.prefix(5).map(\.course.code)
     }
 
+    /// Every address stored in the bundled Spring 2027 snapshot is on
+    /// `northeastern.edu` or `neu.edu`. A field that listed a personal address
+    /// beside an institutional one must not keep the personal one.
+    @Test func bundledSpring2027EmailsAreInstitutional() throws {
+        let url = try #require(
+            AppPaths.bundledCatalogURLs.first { $0.lastPathComponent == "term-202730.catalog" },
+            "Bundled Spring 2027 catalog missing"
+        )
+        let catalog = try CatalogArchive.read(from: url)
+        let address = #/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/#
+        var checked = 0
+        func check(_ text: String, crn: String) {
+            let matches = text.matches(of: address)
+            for match in matches {
+                checked += 1
+                let domain = String(match.output.1).lowercased()
+                #expect(domain == "northeastern.edu" || domain == "neu.edu", "CRN \(crn) has \(domain)")
+            }
+        }
+        for section in catalog.sections {
+            for instructor in section.instructors ?? [] {
+                guard let email = instructor.email else { continue }
+                let matches = email.matches(of: address)
+                #expect(!matches.isEmpty, "Unparsed instructor email on CRN \(section.crn)")
+                let leftover = email.replacing(address, with: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                #expect(leftover.isEmpty, "Instructor email on CRN \(section.crn) is not only institutional addresses")
+                check(email, crn: section.crn)
+            }
+            if let description = section.description { check(description, crn: section.crn) }
+        }
+        for course in catalog.courses {
+            check(course.description, crn: course.code)
+        }
+        #expect(checked > 0)
+    }
+
     @Test func bundledCatalogIsComplete() throws {
         let index = try #require(Self.index)
         #expect(index.courses.count > 2_500)

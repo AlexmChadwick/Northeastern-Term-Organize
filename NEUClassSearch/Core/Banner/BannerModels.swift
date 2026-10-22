@@ -161,7 +161,76 @@ extension BannerMeetingTime {
 extension BannerFaculty {
     func toInstructor() -> Instructor? {
         guard let name = displayName.map({ HTMLText.decodeEntities(HTMLText.decodeEntities($0)) })?.nilIfBlank else { return nil }
-        return Instructor(name: name, primary: primaryIndicator ?? false, email: emailAddress?.nilIfBlank)
+        return Instructor(name: name, primary: primaryIndicator ?? false, email: InstructorEmail.institutional(emailAddress))
+    }
+}
+
+/// Instructor addresses kept from Banner. Only Northeastern's own domains stay;
+/// every other address is dropped, and nothing here is a student's personal data.
+enum InstructorEmail {
+    private static let lock = NSLock()
+    private static var droppedOccurrences = 0
+    private static var droppedUnique = Set<String>()
+    private static var droppedDomainCounts: [String: Int] = [:]
+
+    /// How many non-institutional addresses `institutional(_:)` has discarded.
+    static var droppedCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return droppedOccurrences
+    }
+
+    /// Distinct discarded addresses (the same mailbox on many sections counts once).
+    static var droppedUniqueCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return droppedUnique.count
+    }
+
+    /// Discarded addresses grouped by domain, for a build log. Local parts are not kept.
+    static var droppedDomains: [String: Int] {
+        lock.lock(); defer { lock.unlock() }
+        return droppedDomainCounts
+    }
+
+    /// Addresses whose domain is exactly `northeastern.edu` or `neu.edu`.
+    /// Banner sometimes puts two addresses in one field, separated by a space
+    /// (`person@gmail.com person@northeastern.edu`). Each address is judged on its
+    /// own; the field keeps only the institutional ones, in the order Banner listed
+    /// them, and is dropped when none remain. Subdomains (including `husky.neu.edu`)
+    /// are not kept. Domain matching is case-insensitive; the local part is left
+    /// as Banner wrote it.
+    static func institutional(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        let found = addresses(in: trimmed)
+        if found.isEmpty {
+            recordDrop(trimmed)
+            return nil
+        }
+        var kept: [String] = []
+        for address in found {
+            let domain = String(address[address.index(after: address.lastIndex(of: "@")!)...]).lowercased()
+            if domain == "northeastern.edu" || domain == "neu.edu" {
+                kept.append(address)
+            } else {
+                recordDrop(address, domain: domain)
+            }
+        }
+        guard !kept.isEmpty else { return nil }
+        return kept.joined(separator: " ")
+    }
+
+    /// Email addresses in `text`, in order. A display name around an address
+    /// (`Ada Lovelace <ada@northeastern.edu>`) is not itself an address.
+    private static func addresses(in text: String) -> [String] {
+        text.matches(of: #/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/#).map { String($0.output) }
+    }
+
+    private static func recordDrop(_ email: String, domain: String? = nil) {
+        let host = domain ?? email.split(separator: "@").last.map { String($0).lowercased() } ?? "(invalid)"
+        lock.lock()
+        droppedOccurrences += 1
+        droppedUnique.insert(email.lowercased())
+        droppedDomainCounts[host, default: 0] += 1
+        lock.unlock()
     }
 }
 

@@ -98,13 +98,15 @@ Mac way:
 
 ## Runs fully on device
 
-There is no backend. The app ships with a compressed snapshot of the Fall 2026 catalog
-(`NEUClassSearch/Resources/Catalog/term-202710.catalog`, ~0.9 MB, 3,103 courses / 8,472
-sections) so it works offline instantly. When online it talks **directly** to
-Northeastern's public Banner class search (`nubanner.neu.edu`) to:
+There is no backend. The app ships with compressed snapshots of the Fall 2026 and Spring 2027
+catalogs (`NEUClassSearch/Resources/Catalog/term-202710.catalog`, ~0.9 MB, 3,103 courses /
+8,472 sections, and `term-202730.catalog`, ~0.8 MB, 3,076 courses / 8,326 sections) so it
+works offline instantly. With no term chosen yet, it opens the newest bundled term. When
+online it talks **directly** to Northeastern's public Banner class search
+(`nubanner.neu.edu`) to:
 
 - refresh seats for a course when you open it (2 requests),
-- download a whole term's sections (≈20 requests) — e.g. when Spring 2027 is posted,
+- download a whole term's sections (≈20 requests) — for a term that isn't bundled yet,
 - lazily fetch descriptions, requisites and instructors for courses that aren't in the
   snapshot,
 - look up the catalog entry (prerequisites, credits) of a course that isn't offered this term,
@@ -225,8 +227,12 @@ Tools/build-catalog-snapshot.sh 202730     # a specific term (e.g. Spring 2027)
 
 The script compiles a small command-line tool from the app's own `Core` sources and scrapes
 the term the same way SearchNEU's scraper does (sections, instructors, descriptions,
-requisites, catalog titles) with modest request concurrency. A full term takes about
+requisites, catalog titles) with modest request concurrency. Instructor email addresses are
+kept only when the domain is `northeastern.edu` or `neu.edu`. A full term takes about
 20–25 minutes and writes `term-<code>.catalog` into `NEUClassSearch/Resources/Catalog/`.
+On Linux, install a Swift toolchain and the [lzfse](https://github.com/lzfse/lzfse) reference
+library; the script compiles with `swiftc` and compresses the JSON with `lzfse` into the
+same LZFSE catalog the Mac build writes.
 
 ## Project structure
 

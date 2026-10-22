@@ -21,6 +21,9 @@
 //
 
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 enum BannerError: LocalizedError, Sendable {
     case http(Int)

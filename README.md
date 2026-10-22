@@ -7,6 +7,29 @@ redesigned for iOS 26 and macOS 26 with Liquid Glass.
 
 > Not affiliated with, endorsed by, or sponsored by Northeastern University or Sandbox.
 
+## Install
+
+Term Organize is an early beta. It is unofficial and not affiliated with Northeastern University.
+
+### Mac
+
+1. Download `Term-Organize-1.1.0-2.zip` from the [v1.1.0-beta.2 release](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases/tag/v1.1.0-beta.2). Newer builds go on the [Releases page](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases).
+2. Unzip it and drag **Term Organize** into your Applications folder.
+3. Open it. The build is signed with a Developer ID (team `832J6JB4V7`) and notarized by Apple, so macOS opens it without extra steps.
+
+### iPhone and iPad
+
+Term Organize is not on the App Store or TestFlight yet. You can sideload it by building it yourself:
+
+1. Open `NEUClassSearch.xcodeproj` in Xcode (see Requirements below).
+2. Pick the `NEUClassSearch` scheme and your connected device.
+3. Under Signing & Capabilities, choose your own team. A free Apple ID works, but apps signed with a free account expire after 7 days and need to be rebuilt. A paid developer account lasts a year.
+4. Press Run. On the device, trust your developer profile in Settings > General > VPN & Device Management if asked.
+
+### Build from source (Mac)
+
+Open `NEUClassSearch.xcodeproj` in Xcode, pick the `NEUClassSearch` scheme and My Mac, and press Run.
+
 ## Highlights
 
 - **Search everything** — courses by code (`cs3000`, `CS 3`), title, topic, professor or

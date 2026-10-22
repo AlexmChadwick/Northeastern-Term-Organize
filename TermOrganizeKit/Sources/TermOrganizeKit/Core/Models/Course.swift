@@ -75,6 +75,18 @@ struct Course: Codable, Hashable, Identifiable, Sendable {
     var detailsLoaded: Bool
 
     var key: CourseKey { CourseKey(subject: subject, number: number) }
+
+    /// The fetched catalog entry lists no prerequisites.
+    ///
+    /// `prereqs == nil` is not enough. A stub (`detailsLoaded == false`) is built
+    /// with both requisite fields nil before Banner's tables are read, and that
+    /// nil means unknown. After `fetchCourseDetails`, `detailsLoaded` is true and
+    /// a nil field is the empty table ("No prerequisite information available.").
+    var listsNoPrerequisites: Bool { detailsLoaded && prereqs == nil }
+
+    /// The fetched catalog entry lists no corequisites. A stub's nil `coreqs` is unknown.
+    var listsNoCorequisites: Bool { detailsLoaded && coreqs == nil }
+
     var id: CourseKey { key }
     var code: String { key.description }
 

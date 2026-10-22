@@ -246,7 +246,7 @@ enum MacCatalogSnapshotArguments {
         query.wrappedValue = text
     }
 
-    /// Parses `openSeats,honors,online,nupath:FQ,subject:CS,level:2,campus:Boston,days:noFridays,minCredits:4`.
+    /// Parses `openSeats,honors,noPrerequisites,noCorequisites,online,nupath:FQ,subject:CS,level:2,campus:Boston,days:noFridays,minCredits:4`.
     static func filters(from spec: String) -> SearchFilters {
         var filters = SearchFilters()
         for token in spec.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) {
@@ -255,6 +255,8 @@ enum MacCatalogSnapshotArguments {
             switch pair[0] {
             case "openSeats": filters.openSeatsOnly = true
             case "honors": filters.honorsOnly = true
+            case "noPrerequisites": filters.noPrerequisites = true
+            case "noCorequisites": filters.noCorequisites = true
             case "online": filters.instruction = .online
             case "inPerson": filters.instruction = .inPerson
             case "nupath": if let nupath = NUPath.from(short: value) { filters.nupaths.insert(nupath) }

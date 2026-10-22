@@ -34,6 +34,13 @@ struct MacSearchFiltersForm: View {
                     Toggle("Honors only", isOn: $state.filters.honorsOnly)
                 }
 
+                Section {
+                    Toggle("No prerequisites", isOn: $state.filters.noPrerequisites)
+                    Toggle("No corequisites", isOn: $state.filters.noCorequisites)
+                } footer: {
+                    Text("A course matches only when its catalog details were loaded and list none. A course whose requisites have not been loaded yet is left out.")
+                }
+
                 Section("Course Level") {
                     CourseFlowLayout(spacing: 6, lineSpacing: 6) {
                         ForEach(levelChoices, id: \.self) { level in

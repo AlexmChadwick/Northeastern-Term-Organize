@@ -40,6 +40,18 @@ struct MacSearchFilterBar: View {
             .toggleStyle(.button)
             .help("Show only courses with an honors section")
 
+            Toggle(isOn: $state.filters.noPrerequisites) {
+                Label("No prerequisites", systemImage: "checklist")
+            }
+            .toggleStyle(.button)
+            .help("Show courses whose loaded catalog entry lists no prerequisites. Courses whose requisites have not been loaded are left out.")
+
+            Toggle(isOn: $state.filters.noCorequisites) {
+                Label("No corequisites", systemImage: "link")
+            }
+            .toggleStyle(.button)
+            .help("Show courses whose loaded catalog entry lists no corequisites. Courses whose requisites have not been loaded are left out.")
+
             nupathMenu
             subjectMenu
             levelMenu

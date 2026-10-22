@@ -367,7 +367,9 @@ final class UserDataStore {
         if changed { plansDidChange() }
     }
 
-    /// Fills missing schedule credits and clamps choices a refreshed catalog no longer contains.
+    /// Clamps stored choices a refreshed catalog no longer contains.
+    /// A missing choice is left missing, so this does not rewrite a plan or its
+    /// modified time just to fill in a default.
     func reconcileChosenCredits(indexForTerm: (String) -> CatalogIndex?) {
         var changed = false
         for index in plans.indices {

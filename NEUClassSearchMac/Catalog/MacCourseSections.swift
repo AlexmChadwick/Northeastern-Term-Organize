@@ -382,8 +382,7 @@ struct MacCourseSectionsPane: View {
             columns
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
-        .focusable()
-        .focusSection()
+        .macFocusesOnClick()
         .macScrollsTableSelectionIntoView(when: selection)
         .contextMenu(forSelectionType: String.self) { crns in
             if !crns.isEmpty {

@@ -80,8 +80,8 @@ struct PlanCourse: Codable, Hashable, Identifiable, Sendable {
     /// plans still decode.
     var instance: Int? = nil
     /// Credits chosen for this row when the course is variable. Nil on plans saved
-    /// before the choice existed: those load, then pick up the default. Optional so
-    /// older plans still decode.
+    /// before the choice existed. Readers compute the default, and the value is
+    /// stored only when the user changes it. Optional so older plans still decode.
     var credits: Double? = nil
     /// `CS 4973`, `CS 4973|11111` once a CRN is chosen, or `CS 4973 (2)` for another
     /// copy that has no CRN.

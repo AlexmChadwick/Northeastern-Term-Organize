@@ -165,8 +165,11 @@ private struct MacTableClickFocus: NSViewRepresentable {
 
         func start() {
             guard monitor == nil else { return }
+            // Local monitors run on the main thread, but the handler is not isolated to it.
             monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-                self?.focusIfClick(event)
+                MainActor.assumeIsolated {
+                    self?.focusIfClick(event)
+                }
                 return event
             }
         }
@@ -176,6 +179,7 @@ private struct MacTableClickFocus: NSViewRepresentable {
             monitor = nil
         }
 
+        @MainActor
         func focusIfClick(_ event: NSEvent) {
             guard let anchor, let window = event.window, anchor.window === window else { return }
             guard let table = Self.table(near: anchor) else { return }
@@ -194,6 +198,7 @@ private struct MacTableClickFocus: NSViewRepresentable {
             }
         }
 
+        @MainActor
         static func table(near view: NSView) -> NSTableView? {
             var current: NSView? = view
             while let node = current {

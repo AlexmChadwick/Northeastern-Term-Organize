@@ -205,12 +205,12 @@ struct DegreePlanReview {
                 guard duplicates.contains(key) else { continue }
                 flagged.insert(key)
                 if completed.contains(key) {
-                    notes[course.id] = "Already in your completed courses"
+                    notes[course.id] = "Already in your completed courses. Each copy still counts."
                 } else {
                     let others = plan.terms.filter { $0.id != term.id && $0.courses.contains { $0.key == key } }
                     notes[course.id] = others.isEmpty
-                        ? "Listed more than once in \(term.name)"
-                        : "Also planned in \(others.map(\.name).joined(separator: ", "))"
+                        ? "Listed more than once in \(term.name). Each copy still counts."
+                        : "Also planned in \(others.map(\.name).joined(separator: ", ")). Each copy still counts."
                 }
             }
         }
@@ -221,7 +221,7 @@ struct DegreePlanReview {
             guard let key = course.key, duplicates.contains(key) else { continue }
             let planned = plan.terms.filter { $0.courses.contains { $0.key == key } }
             if !planned.isEmpty {
-                notes[course.id] = "Also planned in \(planned.map(\.name).joined(separator: ", "))"
+                notes[course.id] = "Also planned in \(planned.map(\.name).joined(separator: ", ")). Each copy still counts."
             }
         }
     }

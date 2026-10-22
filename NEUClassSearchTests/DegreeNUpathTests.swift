@@ -99,10 +99,10 @@ struct DegreeNUpathTests {
             DegreePlanCourse(key: CourseKey(string: "CS 4973"), title: "Seminar", credits: 4),
             DegreePlanCourse(key: CourseKey(string: "CS 4973"), title: "Seminar", credits: 4),
         ]
-        let once = DegreeAudit.run(plan: plain, requirements: requirements, attributes: Self.attributes(["CS 4973": [.wi]]))
-        let short = try #require(Self.item(Self.nupath(once), .wi))
-        #expect(short.courses == ["CS 4973"])
-        #expect(short.status == .partial)
+        let twice = DegreeAudit.run(plan: plain, requirements: requirements, attributes: Self.attributes(["CS 4973": [.wi]]))
+        let bothPlain = try #require(Self.item(Self.nupath(twice), .wi))
+        #expect(bothPlain.courses.sorted() == ["CS 4973", "CS 4973 (2)"])
+        #expect(bothPlain.status == .complete)
     }
 
     @Test func everyNUpathRequirementIsChecked() throws {

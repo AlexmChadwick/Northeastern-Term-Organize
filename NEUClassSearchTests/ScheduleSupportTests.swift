@@ -502,7 +502,7 @@ struct SchedulePlanActionsTests {
         #expect(after.selectedCRNs == ["22222"])
     }
 
-    /// A degree-plan draft keeps both pinned topics, and still keeps one row when neither has a CRN.
+    /// A degree-plan draft keeps both pinned topics, and keeps both rows when neither has a CRN.
     @Test func degreePlanDraftKeepsDistinctTopics() {
         let key = CourseKey(subject: "CS", number: "4973")
         var schedule = SchedulePlan(name: "Plan A", termCode: "202730")
@@ -525,6 +525,7 @@ struct SchedulePlanActionsTests {
         let merged = DegreePlanAutofill.newDegreePlanDraft(
             name: "Draft", basedOn: nil, schedulePlans: [schedule], catalogIndex: { _ in nil }
         )
-        #expect(merged.terms.flatMap(\.courses).count == 1)
+        #expect(merged.terms.flatMap(\.courses).count == 2)
+        #expect(merged.terms.flatMap(\.courses).allSatisfy { $0.key == key && $0.crn == nil })
     }
 }

@@ -377,9 +377,10 @@ private struct AuditEngine {
             guard let key = course.key else { return }
             var use = CourseUse(key: key, title: course.title, credits: course.credits, semester: semester, order: order, crn: course.crn)
             let earlier = instances[key, default: []].compactMap { pool[$0] }
-            if let repeated = earlier.first(where: { !Self.countsSeparately(use, $0) }) {
-                // The same class again: keep the better listing. Completed beats planned; then
-                // more credits (a 0-credit line is often a repeat).
+            // A line with no credit is a placeholder, not a second course. Every other copy
+            // counts on its own, including two seminars with the same title or the same CRN.
+            // duplicateKeys still warns about those. It does not drop them from the audit.
+            if use.credits <= 0, let repeated = earlier.first {
                 let better = repeated.isCompleted == use.isCompleted ? use.credits > repeated.credits : use.isCompleted
                 if better {
                     use.instance = repeated.instance

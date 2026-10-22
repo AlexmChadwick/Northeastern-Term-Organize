@@ -469,8 +469,9 @@ enum DegreeRequirementText {
 
 // MARK: - The plan's courses
 
-/// A course in the plan, once, for pickers: completed courses first, then each semester's.
+/// One row in the plan, for pickers. Two copies of a number are two choices.
 struct DegreePlanCourseChoice: Identifiable, Hashable {
+    var id: UUID = UUID()
     var key: CourseKey
     var title: String
     var credits: Double
@@ -478,8 +479,6 @@ struct DegreePlanCourseChoice: Identifiable, Hashable {
     var semester: String?
     /// `Summer A 2027`.
     var semesterShortName: String?
-
-    var id: CourseKey { key }
     var isCompleted: Bool { semester == nil }
     /// `Completed` or `Summer A 2027`.
     var whenLine: String { semesterShortName ?? "Completed" }
@@ -487,16 +486,15 @@ struct DegreePlanCourseChoice: Identifiable, Hashable {
 
 extension DegreePlan {
     var degreeCourseChoices: [DegreePlanCourseChoice] {
-        var seen = Set<CourseKey>()
         var choices: [DegreePlanCourseChoice] = []
         for course in completed {
-            guard let key = course.key, seen.insert(key).inserted else { continue }
-            choices.append(DegreePlanCourseChoice(key: key, title: course.title, credits: course.credits))
+            guard let key = course.key else { continue }
+            choices.append(DegreePlanCourseChoice(id: course.id, key: key, title: course.title, credits: course.credits))
         }
         for term in terms {
             for course in term.courses {
-                guard let key = course.key, seen.insert(key).inserted else { continue }
-                choices.append(DegreePlanCourseChoice(key: key, title: course.title, credits: course.credits,
+                guard let key = course.key else { continue }
+                choices.append(DegreePlanCourseChoice(id: course.id, key: key, title: course.title, credits: course.credits,
                                                       semester: term.name, semesterShortName: term.shortName))
             }
         }

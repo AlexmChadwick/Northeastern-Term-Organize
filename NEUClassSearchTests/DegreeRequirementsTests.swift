@@ -451,8 +451,8 @@ struct DegreeRequirementsTests {
                 == "1 course like Khoury Elective Courses, any course number")
     }
 
-    /// A topics course taken again on another topic counts each time; the same course listed
-    /// twice counts once.
+    /// A topics course taken again counts each time. The same other course listed twice is
+    /// warned and still counts each time.
     @Test func topicsCoursesCountEachTime() throws {
         let requirements = try Self.requirements()
         let electives = try #require(requirements.allRules.first { $0.label.hasPrefix("Complete 8 semester hours of CS") })
@@ -466,16 +466,17 @@ struct DegreeRequirementsTests {
         let result = try #require(audit.result(for: electives.id))
         #expect(result.status == .planned)
         #expect(result.used.map(\.id).sorted() == ["CS 4973", "CS 4973 (2)"])
-        // The second MKTG 2602 is a repeat: it counts once, as a general elective.
+        // MKTG 2602 is listed twice. The plan warns, and both copies count.
         let counted = audit.ruleResults.flatMap(\.used) + audit.unused
-        #expect(counted.filter { $0.key.description == "MKTG 2602" }.count == 1)
+        #expect(counted.filter { $0.key.description == "MKTG 2602" }.map(\.id).sorted() == ["MKTG 2602", "MKTG 2602 (2)"])
         #expect(Set(counted.map(\.id)).count == counted.count)
         // The plan flags the repeat, not the topics course taken again.
         #expect(DegreePlanAnalysis.duplicateKeys(in: plan) == [CourseKey(subject: "MKTG", number: "2602")])
     }
 
-    /// The same number counts twice when each row has its own CRN, once when it does not,
-    /// and once when both rows name the same CRN. Titles here are "Seminar", not a topics title.
+    /// The same number counts twice for different CRNs, for two seminars with no CRN, and
+    /// for the same CRN twice. Titles here are "Seminar", not a topics title. The last two
+    /// are warned. All three still count both copies.
     @Test func distinctCRNsCountSeparately() throws {
         let requirements = try Self.requirements()
         let electives = try #require(requirements.allRules.first { $0.label.hasPrefix("Complete 8 semester hours of CS") })
@@ -496,8 +497,8 @@ struct DegreeRequirementsTests {
         var plain = DegreePlan(name: "Seminars")
         plain.completed = [Self.course("CS 4973", 4, "Seminar"), Self.course("CS 4973", 4, "Seminar")]
         let once = try #require(DegreeAudit.run(plan: plain, requirements: requirements).result(for: electives.id))
-        #expect(once.used.map(\.id) == ["CS 4973"])
-        #expect(once.used.reduce(0) { $0 + $1.credits } == 4)
+        #expect(once.used.map(\.id).sorted() == ["CS 4973", "CS 4973 (2)"])
+        #expect(once.used.reduce(0) { $0 + $1.credits } == 8)
         #expect(DegreePlanAnalysis.duplicateKeys(in: plain) == [key])
 
         var repeated = DegreePlan(name: "Seminars")
@@ -506,7 +507,8 @@ struct DegreeRequirementsTests {
             Self.course("CS 4973", 4, "Seminar", crn: "11111"),
         ]
         let same = try #require(DegreeAudit.run(plan: repeated, requirements: requirements).result(for: electives.id))
-        #expect(same.used.map(\.id) == ["CS 4973"])
+        #expect(same.used.map(\.id).sorted() == ["CS 4973", "CS 4973 (2)"])
+        #expect(same.used.reduce(0) { $0 + $1.credits } == 8)
         #expect(DegreePlanAnalysis.duplicateKeys(in: repeated) == [key])
     }
 

@@ -108,6 +108,9 @@ struct RootView: View {
         .overlay(alignment: .top) {
             TransientErrorBanner()
         }
+        .task(id: catalog.indexVersion) {
+            userData.reconcileChosenCredits { catalog.cachedIndex(for: $0) }
+        }
     }
 
     /// Watched sections that currently have open seats.

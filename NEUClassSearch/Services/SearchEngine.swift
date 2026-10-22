@@ -40,6 +40,29 @@ enum SearchSort: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
+/// Undergrad is a course number below 5000. Grad is 5000 and above.
+enum DegreeLevelFilter: String, CaseIterable, Codable, Identifiable, Sendable {
+    case all, undergrad, grad
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all: "All"
+        case .undergrad: "Undergrad"
+        case .grad: "Grad"
+        }
+    }
+
+    func matches(_ key: CourseKey) -> Bool {
+        switch self {
+        case .all: true
+        case .undergrad: key.numericValue < 5000
+        case .grad: key.numericValue >= 5000
+        }
+    }
+}
+
 enum InstructionFilter: String, CaseIterable, Codable, Identifiable, Sendable {
     case any, inPerson, online
     var id: String { rawValue }
@@ -68,6 +91,9 @@ struct SearchFilters: Hashable, Codable, Sendable {
     /// Keep a course only when its fetched catalog entry lists no corequisites.
     /// A stub whose requisites were never loaded is left out.
     var noCorequisites = false
+    /// Nil and `.all` both mean every course. Optional so filters saved before
+    /// the control existed still decode.
+    var degreeLevel: DegreeLevelFilter? = nil
 
     var campuses: Set<String> = []
     var classTypes: Set<String> = []
@@ -91,6 +117,7 @@ struct SearchFilters: Hashable, Codable, Sendable {
         if minCredits != nil || maxCredits != nil { n += 1 }
         if noPrerequisites { n += 1 }
         if noCorequisites { n += 1 }
+        if let degreeLevel, degreeLevel != .all { n += 1 }
         if !campuses.isEmpty { n += 1 }
         if !classTypes.isEmpty { n += 1 }
         if honorsOnly { n += 1 }
@@ -119,6 +146,7 @@ struct SearchFilters: Hashable, Codable, Sendable {
         if let maxCredits, course.minCredits > maxCredits { return false }
         if noPrerequisites, !course.listsNoPrerequisites { return false }
         if noCorequisites, !course.listsNoCorequisites { return false }
+        if let degreeLevel, !degreeLevel.matches(course.key) { return false }
         return true
     }
 

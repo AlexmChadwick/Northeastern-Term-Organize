@@ -154,7 +154,11 @@ struct DegreeCourseLookup {
     func credits(of key: CourseKey) -> Double? {
         if let counted = countedBy[key]?.use.credits, counted > 0 { return counted }
         if let planned = choices[key]?.credits, planned > 0 { return planned }
-        return bannerCourse(key)?.maxCredits ?? infoStates[key]?.degreeInfo?.maxCredits ?? choices[key]?.credits
+        if let course = bannerCourse(key) { return course.defaultChoiceCredits }
+        if let info = infoStates[key]?.degreeInfo, let low = info.minCredits ?? info.maxCredits {
+            return CreditSpan(low: low, high: info.maxCredits ?? low, bannerDefault: nil).defaultChoice()
+        }
+        return choices[key]?.credits
     }
 
     // MARK: Equivalences and retired courses

@@ -270,6 +270,8 @@ private struct MacSubjectList: View {
                 }
             }
             .listStyle(.inset)
+            .focusable()
+            .focusSection()
             .overlay {
                 if sections.isEmpty {
                     ContentUnavailableView.search(text: query)
@@ -347,6 +349,8 @@ private struct MacNUPathList: View {
                     .tag(nupath)
             }
         }
+        .focusable()
+        .focusSection()
         .listStyle(.inset)
         .overlay {
             if attributes.isEmpty {

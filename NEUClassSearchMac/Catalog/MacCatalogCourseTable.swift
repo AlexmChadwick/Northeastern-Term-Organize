@@ -22,16 +22,19 @@ struct MacCatalogCourseRow: Identifiable {
     var stats: CourseStats
     /// Why the course matched a search when its title doesn't say ("Taught by Jane Doe").
     var note: String?
+    /// Muted restriction note, such as a CPS-only caption.
+    var caption: String?
     /// When the course was saved (the saved list).
     var savedAt: Date?
 
     var id: CourseKey { key }
 
-    init(course: Course, stats: CourseStats, note: String? = nil, savedAt: Date? = nil) {
+    init(course: Course, stats: CourseStats, note: String? = nil, caption: String? = nil, savedAt: Date? = nil) {
         self.key = course.key
         self.course = course
         self.stats = stats
         self.note = note
+        self.caption = caption
         self.savedAt = savedAt
     }
 
@@ -41,6 +44,7 @@ struct MacCatalogCourseRow: Identifiable {
         self.course = nil
         self.stats = CourseStats()
         self.note = nil
+        self.caption = nil
         self.savedAt = savedAt
     }
 
@@ -178,18 +182,17 @@ struct MacCatalogCourseTable: View, Equatable {
     private func table(tier: MacCatalogColumnTier) -> some View {
         let dropped = Self.optionalColumnIDs.filter { Self.firstTier(of: $0, style: style) > tier }
         return Table(
-            of: MacCatalogCourseRow.self,
+            sortedRows,
             selection: $selection,
             sortOrder: $sortOrder,
             columnCustomization: MacCatalogTableColumns.binding($customization, dropping: dropped)
         ) {
             columns
-        } rows: {
-            ForEach(sortedRows) { row in
-                TableRow(row).draggable(row.key.description)
-            }
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .focusable()
+        .focusSection()
+        .macScrollsTableSelectionIntoView(when: selection)
         .contextMenu(forSelectionType: CourseKey.self) { keys in
             if !keys.isEmpty {
                 MacCatalogCourseMenu(
@@ -245,6 +248,7 @@ struct MacCatalogCourseTable: View, Equatable {
     private var columns: some TableColumnContent<MacCatalogCourseRow, KeyPathComparator<MacCatalogCourseRow>> {
         TableColumn("Course", value: \.key) { row in
             MacCourseCodeCell(row: row, termCode: termCode, showsSaved: style != .saved)
+                .draggable(row.key.description)
         }
         .width(min: 92, ideal: 104, max: 140)
         .customizationID("course")
@@ -363,6 +367,10 @@ private struct MacCourseTitleCell: View {
         } else {
             Text(row.title)
                 .lineLimit(1)
+        }
+        if let caption = row.caption {
+            CatalogCaption(text: caption)
+                .lineLimit(2)
         }
     }
 }

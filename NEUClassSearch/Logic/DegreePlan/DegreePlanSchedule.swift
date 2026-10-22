@@ -18,13 +18,16 @@ extension UserDataStore {
         guard !rows.isEmpty else { return nil }
         let wanted = rows.map { ScheduleRowSignature(key: $0.key.description, crn: $0.crn, instance: $0.instance) }.sorted()
         if let existing = plans(in: termCode).first(where: { Self.signature(of: $0) == wanted }) {
-            return (existing, false, rows.count)
+            updatePlan(id: existing.id) { plan in
+                _ = CreditSync.apply(degree: semester.courses, to: &plan)
+            }
+            return (plan(id: existing.id) ?? existing, false, rows.count)
         }
         let name = DegreePlanEditing.scheduleName(for: semester, existing: plans(in: termCode).map(\.name))
         let schedule = createPlan(name: name, termCode: termCode)
         updatePlan(id: schedule.id) { plan in
             for row in rows {
-                var course = PlanCourse(key: row.key, colorIndex: plan.courses.count, pinnedCRN: row.crn)
+                var course = PlanCourse(key: row.key, colorIndex: plan.courses.count, pinnedCRN: row.crn, credits: row.credits)
                 course.instance = row.instance
                 plan.courses.append(course)
             }
@@ -34,9 +37,9 @@ extension UserDataStore {
 
     /// One schedule row per degree-plan row. A second copy with no CRN gets `instance`
     /// so its id is not the same as the first row's.
-    private static func scheduleRows(for semester: DegreePlanTerm) -> [(key: CourseKey, crn: String?, instance: Int?)] {
+    private static func scheduleRows(for semester: DegreePlanTerm) -> [(key: CourseKey, crn: String?, instance: Int?, credits: Double)] {
         var seen = [CourseKey: Int]()
-        var rows: [(key: CourseKey, crn: String?, instance: Int?)] = []
+        var rows: [(key: CourseKey, crn: String?, instance: Int?, credits: Double)] = []
         for course in semester.courses {
             guard let key = course.key else { continue }
             let trimmed = course.crn?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -47,7 +50,7 @@ extension UserDataStore {
                 seen[key] = count
                 if count > 1 { instance = count }
             }
-            rows.append((key, crn, instance))
+            rows.append((key, crn, instance, course.credits))
         }
         return rows
     }

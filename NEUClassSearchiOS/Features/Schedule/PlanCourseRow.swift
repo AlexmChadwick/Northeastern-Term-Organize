@@ -18,28 +18,47 @@ struct PlanCourseRow: View {
     var conflictingKeys: [CourseKey] = []
     var onOpen: () -> Void
     var onToggleRequired: () -> Void
+    var onSetCredits: ((Double) -> Void)? = nil
+
+    private var creditSection: CourseSection? {
+        entry.planCourse.pinnedCRN.flatMap { pin in entry.allSections.first { $0.crn == pin } }
+    }
+
+    private var creditSpan: CreditSpan? {
+        ChosenCredits.span(course: entry.course, section: creditSection)
+    }
 
     var body: some View {
         // The summary spans the full width; the Required/Optional switch floats at the
-        // top trailing corner, beside the course code only.
-        ZStack(alignment: .topTrailing) {
-            HStack(alignment: .top, spacing: 12) {
-                PlanColorDot(colorIndex: entry.planCourse.colorIndex, size: 12)
-                    .padding(.top, 8)
-                VStack(alignment: .leading, spacing: 4) {
-                    header
-                    sectionLines
+        // top trailing corner, beside the course code only. The stepper sits outside
+        // the tap that opens the section picker.
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .topTrailing) {
+                HStack(alignment: .top, spacing: 12) {
+                    PlanColorDot(colorIndex: entry.planCourse.colorIndex, size: 12)
+                        .padding(.top, 8)
+                    VStack(alignment: .leading, spacing: 4) {
+                        header
+                        sectionLines
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
-            }
-            .contentShape(.rect)
-            .onTapGesture(perform: onOpen)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityHint("Choose a section")
-            .accessibilityAction(.default, onOpen)
+                .contentShape(.rect)
+                .onTapGesture(perform: onOpen)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Choose a section")
+                .accessibilityAction(.default, onOpen)
 
-            requiredButton
+                requiredButton
+            }
+            if let creditSpan, creditSpan.isVariable, let onSetCredits {
+                CreditChoiceControl(
+                    span: creditSpan,
+                    credits: ChosenCredits.resolved(stored: entry.planCourse.credits, course: entry.course, section: creditSection),
+                    onChange: onSetCredits
+                )
+            }
         }
         .padding(.vertical, 2)
     }
@@ -53,7 +72,7 @@ struct PlanCourseRow: View {
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(entry.color.text)
                     .monospacedDigit()
-                if let course = entry.course {
+                if let course = entry.course, creditSpan?.isVariable != true {
                     Text(course.creditsLabel)
                         .font(.caption)
                         .foregroundStyle(.secondary)

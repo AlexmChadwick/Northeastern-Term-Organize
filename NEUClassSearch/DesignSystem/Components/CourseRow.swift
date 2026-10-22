@@ -16,6 +16,8 @@ struct CourseRow: View {
     var stats: CourseStats?
     /// Optional context line, e.g. "Taught by Jane Doe".
     var note: String?
+    /// Muted note under the course, such as a CPS restriction.
+    var caption: String? = nil
     var showsAvailability = true
 
     var body: some View {
@@ -38,6 +40,9 @@ struct CourseRow: View {
                 .foregroundStyle(.primary)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
+            if let caption {
+                CatalogCaption(text: caption)
+            }
             if let note {
                 Label(note, systemImage: "info.circle")
                     .font(.caption)

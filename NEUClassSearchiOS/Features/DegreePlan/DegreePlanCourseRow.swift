@@ -28,6 +28,8 @@ struct DegreePlanActions {
     var addEquivalence: (CourseKey) -> Void = { _ in }
     /// Puts a course in a planned course's place (a retired course's current equivalent).
     var replaceCourse: (DegreePlanCourse, CourseKey) -> Void = { _, _ in }
+    /// Sets the credits of one row (its id, then the chosen value).
+    var setCredits: (UUID, Double) -> Void = { _, _ in }
 }
 
 /// A course in a plan: tinted code, title, credits and anything worth a second look —
@@ -52,6 +54,10 @@ struct DegreePlanCourseRow: View {
     /// Where the degree requirements count the course, e.g. "Counts toward Khoury Elective
     /// Courses" (only when the plan's requirements are set up).
     var requirementNote: String?
+    /// CPS restriction note, when the catalog has loaded section restrictions.
+    var caption: String? = nil
+    /// When false, the parent draws the variable-credit stepper outside a navigation link.
+    var showsCredits = true
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -64,6 +70,9 @@ struct DegreePlanCourseRow: View {
                     .foregroundStyle(course.key == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if let caption {
+                CatalogCaption(text: caption)
             }
             flags
         }
@@ -95,11 +104,14 @@ struct DegreePlanCourseRow: View {
             .monospacedDigit()
     }
 
+    @ViewBuilder
     private var credits: some View {
-        Text(DegreePlanText.credits(course.credits))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
+        if showsCredits {
+            Text(DegreePlanText.credits(course.credits))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
     }
 
     @ViewBuilder

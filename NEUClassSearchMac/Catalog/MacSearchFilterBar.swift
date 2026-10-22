@@ -28,6 +28,8 @@ struct MacSearchFilterBar: View {
 
     var body: some View {
         CourseFlowLayout(spacing: 8, lineSpacing: 6) {
+            DegreeLevelFilterPicker(filters: $state.filters)
+                .frame(width: 240)
             Toggle(isOn: $state.filters.openSeatsOnly) {
                 Label("Open Seats", systemImage: "chair")
             }

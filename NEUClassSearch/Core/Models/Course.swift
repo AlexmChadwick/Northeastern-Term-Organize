@@ -58,6 +58,9 @@ struct Course: Codable, Hashable, Identifiable, Sendable {
     var description: String
     var minCredits: Double
     var maxCredits: Double
+    /// Banner's `creditHours` default when the course is variable. Nil on catalogs
+    /// saved before it was kept. Missing keys still decode.
+    var defaultCredits: Double? = nil
     /// Banner attribute codes shared by the course's sections (NUpath, honors, ...).
     var attributes: [String]
     var prereqs: Requisite?
@@ -86,6 +89,15 @@ struct Course: Codable, Hashable, Identifiable, Sendable {
 
     /// The fetched catalog entry lists no corequisites. A stub's nil `coreqs` is unknown.
     var listsNoCorequisites: Bool { detailsLoaded && coreqs == nil }
+
+    var creditSpan: CreditSpan {
+        CreditSpan(low: minCredits, high: maxCredits, bannerDefault: defaultCredits)
+    }
+
+    var isVariableCredit: Bool { creditSpan.isVariable }
+
+    /// The credits a new plan row starts at: Banner's default when it is inside the range, otherwise the low end.
+    var defaultChoiceCredits: Double { creditSpan.defaultChoice() }
 
     var id: CourseKey { key }
     var code: String { key.description }

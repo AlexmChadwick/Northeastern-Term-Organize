@@ -46,6 +46,7 @@ struct MacSearchView: View {
         var termCode: String?
         var updatedAt: Date?
         var liveRefreshes: [CourseKey: Date]
+        var indexVersion: Int
     }
 
     // MARK: Derived state
@@ -80,7 +81,8 @@ struct MacSearchView: View {
             query: query,
             termCode: catalog.readyIndex?.term.code,
             updatedAt: catalog.sectionsUpdatedAt,
-            liveRefreshes: catalog.liveRefreshedAt
+            liveRefreshes: catalog.liveRefreshedAt,
+            indexVersion: catalog.indexVersion
         )
     }
 
@@ -403,7 +405,14 @@ struct MacSearchView: View {
         }
         let response = await catalog.search(query)
         if Task.isCancelled { return }
-        let rows = response.results.map { MacCatalogCourseRow(course: $0.course, stats: $0.stats, note: $0.matchNote) }
+        let rows = response.results.map {
+            MacCatalogCourseRow(
+                course: $0.course,
+                stats: $0.stats,
+                note: $0.matchNote,
+                caption: CPSNote.courseCaption(sections: index.sections(for: $0.course.key))
+            )
+        }
         revision += 1
         completed = Completed(termCode: index.term.code, query: query, response: response, rows: rows, revision: revision)
         let present = Set(rows.map(\.key))

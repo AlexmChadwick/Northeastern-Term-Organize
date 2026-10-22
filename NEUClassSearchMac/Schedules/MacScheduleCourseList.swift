@@ -24,6 +24,7 @@ struct MacCourseListActions {
     var showFilters: () -> Void
     /// Courses (or sections) pasted as text: `CS 3000` or `CS 3000 12345` per line.
     var paste: ([String]) -> Void
+    var setCredits: (String, Double) -> Void = { _, _ in }
 }
 
 /// The left side of a schedule: what needs attention, then the courses with their chosen sections,
@@ -130,7 +131,8 @@ struct MacScheduleCourseList: View {
                     termName: termName,
                     conflictingKeys: conflictingKeys(for: entry),
                     onChooseSection: { actions.chooseSection(entry.id) },
-                    onToggleRequired: { actions.toggleRequired(entry.id) }
+                    onToggleRequired: { actions.toggleRequired(entry.id) },
+                    onSetCredits: { credits in actions.setCredits(entry.id, credits) }
                 )
                 .tag(entry.id)
             }
@@ -336,6 +338,15 @@ struct MacPlanCourseRow: View {
     var conflictingKeys: [CourseKey] = []
     var onChooseSection: () -> Void
     var onToggleRequired: () -> Void
+    var onSetCredits: ((Double) -> Void)? = nil
+
+    private var creditSection: CourseSection? {
+        entry.planCourse.pinnedCRN.flatMap { pin in entry.allSections.first { $0.crn == pin } }
+    }
+
+    private var creditSpan: CreditSpan? {
+        ChosenCredits.span(course: entry.course, section: creditSection)
+    }
 
     /// The width of the row: a wide one has room for two columns.
     @State private var width: CGFloat = 0
@@ -412,7 +423,13 @@ struct MacPlanCourseRow: View {
     private var codeAndCredits: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             code
-            if let course = entry.course {
+            if let creditSpan, creditSpan.isVariable, let onSetCredits {
+                CreditChoiceControl(
+                    span: creditSpan,
+                    credits: ChosenCredits.resolved(stored: entry.planCourse.credits, course: entry.course, section: creditSection),
+                    onChange: onSetCredits
+                )
+            } else if let course = entry.course {
                 Text(course.creditsLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -344,18 +344,23 @@ enum DegreePlanAutofill {
                 let crn = chosenCRN(planCourse, in: plan, index: index)
                 // One schedule row lines up with one degree-plan row. A second copy of the
                 // same number is not absorbed by the first, even when neither has a CRN.
+                let course = index?.course(planCourse.key)
+                let section = crn.flatMap { index?.section(crn: $0) }
                 if let match = unmatched.firstIndex(where: { row in
                     guard row.key == planCourse.key else { return false }
                     return Self.sameSection(row.crn, crn)
                 }) {
-                    unmatched.remove(at: match)
+                    let matched = unmatched.remove(at: match)
+                    if planCourse.credits != nil {
+                        let value = ChosenCredits.resolved(stored: planCourse.credits, course: course, section: section)
+                        Self.writeCredits(value, on: matched.id, in: &draft)
+                    }
                     continue
                 }
-                let course = index?.course(planCourse.key)
                 let added = DegreePlanCourse(
                     key: planCourse.key,
                     title: DegreePlanFormat.exportTitle(course?.title ?? planCourse.key.description),
-                    credits: course?.maxCredits ?? 4,
+                    credits: ChosenCredits.resolved(stored: planCourse.credits, course: course, section: section),
                     crn: crn
                 )
                 draft.terms[termPosition].courses.append(added)
@@ -363,6 +368,19 @@ enum DegreePlanAutofill {
         }
         draft.sortTerms()
         return draft
+    }
+
+    /// Writes a chosen credit value onto one row of a draft, planned or completed.
+    private static func writeCredits(_ credits: Double, on id: UUID, in plan: inout DegreePlan) {
+        for term in plan.terms.indices {
+            if let index = plan.terms[term].courses.firstIndex(where: { $0.id == id }) {
+                plan.terms[term].courses[index].credits = credits
+                return
+            }
+        }
+        if let index = plan.completed.firstIndex(where: { $0.id == id }) {
+            plan.completed[index].credits = credits
+        }
     }
 
     /// Whether two copied rows name the same section. Nil and a blank CRN are the same.

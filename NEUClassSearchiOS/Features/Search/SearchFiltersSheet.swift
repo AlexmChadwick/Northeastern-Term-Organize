@@ -73,6 +73,14 @@ struct SearchFiltersSheet: View {
         NavigationStack(path: $path) {
             ScrollViewReader { proxy in
                 Form {
+                    Section {
+                        DegreeLevelFilterPicker(filters: Binding(
+                            get: { searchModel.filters },
+                            set: { searchModel.filters = $0 }
+                        ))
+                    } footer: {
+                        Text("Undergrad is a course number below 5000. Grad is 5000 and above. This combines with the other filters.")
+                    }
                     quickSection
                     subjectsSection
                     levelSection

@@ -360,6 +360,7 @@ struct MacDegreePlanContent: View {
                     plan: plan,
                     review: review,
                     catalog: snapshot,
+                    editor: editor,
                     isExpanded: completedBinding(plan),
                     requirementNote: { requirements.requirementNote(for: $0, semester: nil) },
                     onDrop: { items in dropOnCompleted(items) }
@@ -829,7 +830,10 @@ struct MacDegreePlanContent: View {
     private func replace(_ course: DegreePlanCourse, with key: CourseKey) {
         let snapshot = catalog.degreePlanSnapshot()
         let title = snapshot.course(key)?.title.nilIfBlank ?? info.info(for: key)?.title.nilIfBlank ?? key.description
-        let credits = snapshot.course(key)?.maxCredits ?? info.info(for: key)?.maxCredits ?? course.credits
+        let credits = snapshot.course(key)?.defaultChoiceCredits ?? info.info(for: key).flatMap { info in
+            guard let low = info.minCredits ?? info.maxCredits else { return nil as Double? }
+            return CreditSpan(low: low, high: info.maxCredits ?? low, bannerDefault: nil).defaultChoice()
+        } ?? course.credits
         let replacement = DegreePlanCourse(key: key, title: DegreePlanFormat.exportTitle(title), credits: credits)
         editor.perform("Replace \(courseName(course)) with \(key)") {
             DegreePlanEditing.replacePlannedCourse(course.id, with: replacement, in: &$0)

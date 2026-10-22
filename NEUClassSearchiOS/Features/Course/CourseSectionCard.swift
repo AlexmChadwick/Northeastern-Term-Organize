@@ -90,6 +90,9 @@ struct CourseSectionCard: View {
                         .font(.subheadline.weight(.medium))
                         .padding(.top, 2)
                 }
+                if CPSNote.isCPSOnly(section.restrictions) == true {
+                    CatalogCaption(text: CPSNote.only)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             seatsBadge

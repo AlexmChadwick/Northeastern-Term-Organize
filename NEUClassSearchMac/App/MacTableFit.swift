@@ -11,6 +11,12 @@ import AppKit
 import SwiftUI
 
 extension View {
+    /// Asks the AppKit table under this view to scroll its selected row into view when `token` changes.
+    /// Arrow keys move the selection natively; this keeps that row on screen after the binding updates.
+    func macScrollsTableSelectionIntoView(when token: some Hashable) -> some View {
+        background { MacTableSelectionScroll(token: AnyHashable(token)) }
+    }
+
     /// Makes the columns of a `Table` (made when `token` last changed) fit the room it has.
     ///
     /// The detail column of the main window runs under the sidebar, so a table in it is a scroll view
@@ -20,6 +26,29 @@ extension View {
     /// them where there is room. Use it on a table that gets a new `.id` when its columns change.
     func macFitsTableColumns(when token: some Hashable) -> some View {
         background { MacTableFit(token: AnyHashable(token)) }
+    }
+}
+
+/// Scrolls the selected row of the table that contains this view into view.
+private struct MacTableSelectionScroll: NSViewRepresentable {
+    var token: AnyHashable
+
+    final class Coordinator {
+        var token: AnyHashable?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard context.coordinator.token != token else { return }
+        context.coordinator.token = token
+        Task { @MainActor [weak view] in
+            try? await Task.sleep(for: .milliseconds(40))
+            guard let view, let table = MacTableFit.table(containing: view) else { return }
+            guard let row = table.selectedRowIndexes.last, row >= 0 else { return }
+            table.scrollRowToVisible(row)
+        }
     }
 }
 
@@ -53,11 +82,7 @@ private struct MacTableFit: NSViewRepresentable {
     /// columns are fitted to what shows.
     @MainActor
     private static func fitTable(behind view: NSView) {
-        guard let root = view.window?.contentView else { return }
-        let middle = view.convert(CGPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
-        guard let table = tables(in: root).first(where: { table in
-            table.convert(table.visibleRect, to: nil).contains(middle)
-        }), let scroll = table.enclosingScrollView else { return }
+        guard let table = table(containing: view), let scroll = table.enclosingScrollView else { return }
         let shown = scroll.contentView.bounds.width - scroll.contentInsets.left - scroll.contentInsets.right
         guard table.frame.width > shown + 2 else { return }
         table.sizeToFit()
@@ -66,6 +91,16 @@ private struct MacTableFit: NSViewRepresentable {
             print("MacTableFit: fitted a table of \(Int(shown)) points to \(Int(table.frame.width))")
         }
         #endif
+    }
+
+    /// The table whose visible frame holds the middle of `view`.
+    @MainActor
+    static func table(containing view: NSView) -> NSTableView? {
+        guard let root = view.window?.contentView else { return nil }
+        let middle = view.convert(CGPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+        return tables(in: root).first { table in
+            table.convert(table.visibleRect, to: nil).contains(middle)
+        }
     }
 
     @MainActor

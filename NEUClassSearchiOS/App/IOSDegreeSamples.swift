@@ -122,7 +122,7 @@ enum IOSDegreeSamples {
         func course(_ subject: String, _ number: String, _ title: String, _ credits: Double) -> DegreePlanCourse {
             let key = CourseKey(subject: subject, number: number)
             let listed = index?.course(key)
-            return DegreePlanCourse(key: key, title: DegreePlanFormat.exportTitle(listed?.title ?? title), credits: listed?.maxCredits ?? credits)
+            return DegreePlanCourse(key: key, title: DegreePlanFormat.exportTitle(listed?.title ?? title), credits: listed?.defaultChoiceCredits ?? credits)
         }
 
         var plan = DegreePlan(name: "BSCS Four-Year Plan")

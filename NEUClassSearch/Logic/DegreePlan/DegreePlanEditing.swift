@@ -24,6 +24,19 @@ enum DegreePlanEditing {
         plan.completed.removeAll { $0.id == courseID }
     }
 
+    /// Sets the credits of one planned or completed row.
+    static func setCredits(_ courseID: UUID, to credits: Double, in plan: inout DegreePlan) {
+        for term in plan.terms.indices {
+            if let index = plan.terms[term].courses.firstIndex(where: { $0.id == courseID }) {
+                plan.terms[term].courses[index].credits = credits
+                return
+            }
+        }
+        if let index = plan.completed.firstIndex(where: { $0.id == courseID }) {
+            plan.completed[index].credits = credits
+        }
+    }
+
     /// Appends a course to a semester.
     static func add(_ course: DegreePlanCourse, toTerm termID: UUID, in plan: inout DegreePlan) {
         guard let index = plan.terms.firstIndex(where: { $0.id == termID }) else { return }

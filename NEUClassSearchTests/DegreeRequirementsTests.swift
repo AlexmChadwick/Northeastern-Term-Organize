@@ -339,7 +339,11 @@ struct DegreeRequirementsTests {
         let audit = DegreeAudit.run(plan: plan, requirements: requirements)
         let core = try #require(audit.result(for: required.id))
         #expect(core.status == .planned)
-        #expect(core.used.map { ($0.key.description, $0.credits, $0.semester) } == [("CS 3000", 4, "Fall 2026")])
+        #expect(core.used.count == 1)
+        let attempt = try #require(core.used.first)
+        #expect(attempt.key.description == "CS 3000")
+        #expect(attempt.credits == 4)
+        #expect(attempt.semester == "Fall 2026")
 
         let scienceResult = try #require(audit.result(for: science.id))
         #expect(scienceResult.used.map(\.key.description) == ["CS 4973"])

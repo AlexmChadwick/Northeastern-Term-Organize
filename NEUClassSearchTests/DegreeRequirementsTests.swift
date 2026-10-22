@@ -315,6 +315,50 @@ struct DegreeRequirementsTests {
         #expect(electiveResult.remainingHours == 7)
     }
 
+    /// A withdrawn CS 3000 (no credits) must not fill the required course, and the in-progress
+    /// attempt must not be left over for a "courses like Khoury Elective Courses" petition.
+    @Test func withdrawnAttemptDoesNotFillARequiredCourseOrASubstitution() throws {
+        let requirements = try Self.requirements()
+        let science = try #require(requirements.allRules.first { $0.label.hasPrefix("Complete two courses") })
+        let electives = try #require(requirements.allRules.first { $0.label.hasPrefix("Complete 8 semester hours of CS") })
+        let required = try #require(requirements.allRules.first { $0.label == "CS 3000" })
+
+        var plan = DegreePlan(name: "Withdrawn retake")
+        plan.completed = [
+            Self.course("CS 3000", 0, "Algorithms and Data"),
+            Self.course("CS 4973", 4, "Topics in Computer Science"),
+        ]
+        var fall = DegreePlanTerm(season: .fall, year: 2026)
+        fall.courses = [Self.course("CS 3000", 4, "Algorithms and Data")]
+        plan.terms = [fall]
+        plan.substitutions = [RequirementSubstitution(
+            ruleID: science.id, ruleTitle: "Science Requirement",
+            change: .replace(RequirementReplacement(count: 2, likeRuleID: electives.id, likeRuleTitle: "Khoury Elective Courses"))
+        )]
+
+        let audit = DegreeAudit.run(plan: plan, requirements: requirements)
+        let core = try #require(audit.result(for: required.id))
+        #expect(core.status == .planned)
+        #expect(core.used.count == 1)
+        let attempt = try #require(core.used.first)
+        #expect(attempt.key.description == "CS 3000")
+        #expect(attempt.credits == 4)
+        #expect(attempt.semester == "Fall 2026")
+
+        let scienceResult = try #require(audit.result(for: science.id))
+        #expect(scienceResult.used.map(\.key.description) == ["CS 4973"])
+        #expect(scienceResult.status == .partial && scienceResult.remainingCount == 1)
+        #expect(audit.ruleResults.flatMap(\.used).allSatisfy { $0.credits > 0 })
+        #expect(audit.completedHours == 4 && audit.plannedHours == 4)
+
+        var withdrawnOnly = DegreePlan(name: "Withdrawn only")
+        withdrawnOnly.completed = [Self.course("CS 3000", 0, "Algorithms and Data")]
+        let blank = DegreeAudit.run(plan: withdrawnOnly, requirements: requirements)
+        #expect(blank.result(for: required.id)?.status == .missing)
+        #expect(blank.result(for: required.id)?.used.isEmpty == true)
+        #expect(blank.completedHours == 0)
+    }
+
     /// A course one list can do without moves to a requirement that needs it: HIST 2220 fills
     /// "Computing and Social Issues" so that CY 4170 can be a Khoury elective — even when
     /// HIST 2220 first has to be replaced in another list. Mirrors a real plan that the first

@@ -111,7 +111,7 @@ import Testing
         #expect(plan.terms[0].courses.count == 2)
         #expect(plan.terms[0].credits == 8)
         #expect(plan.plannedCredits == 8)
-        #expect(DegreePlanLogic.duplicateKeys(in: plan).contains(CourseKey(subject: "CS", number: "4973")))
+        #expect(DegreePlanAnalysis.duplicateKeys(in: plan).contains(CourseKey(subject: "CS", number: "4973")))
     }
 
     @Test func syncCopiesCreditsBothWaysWithoutMergingRows() {
@@ -136,7 +136,12 @@ import Testing
     }
 
     @Test func scheduleTotalsUseTheChosenValue() throws {
-        let course = readings()
+        let course = Course(
+            subject: "CS", number: "8982", title: "Readings", description: "",
+            minCredits: 1, maxCredits: 16, defaultCredits: 4, attributes: [],
+            prereqs: nil, coreqs: nil, postreqs: [], specialTopics: false,
+            college: nil, department: nil, detailsLoaded: true
+        )
         let term = Term(code: "202730", bannerDescription: "Spring 2027 Semester")
         let index = CatalogIndex.build(TermCatalog(
             term: term, courses: [course], sections: [], subjects: [], attributes: [], campuses: []
@@ -267,7 +272,7 @@ import Testing
         #expect(gradCodes == ["CS 5000"])
         #expect(graduate.activeCount == 2)
 
-        var all = SearchFilters()
+        let all = SearchFilters()
         #expect(all.activeCount == 0)
         #expect((all.degreeLevel ?? .all) == .all)
     }

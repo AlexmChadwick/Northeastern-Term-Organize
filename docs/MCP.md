@@ -176,8 +176,14 @@ No arguments.
 
 ### `search_courses`
 
-Required: `term`. Optional: `query`, `subject`, `number`, `attribute`, `limit`
-(1 to 100, default 25).
+Required: `term`. Optional: `query`, `subject`, `number`, `attribute`,
+`no_prerequisites`, `no_corequisites`, `limit` (1 to 100, default 25).
+
+`no_prerequisites` and `no_corequisites` are booleans. A course matches only
+when its catalog details were loaded and that table is empty. `prereqs` or
+`coreqs` being absent on a course whose details were not loaded means the
+requisites are unknown, so that course is left out. Omitted or false leaves
+the filter off. The same rule is `SearchFilters.matches(course:)` in the app.
 
 ```json
 {

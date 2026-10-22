@@ -93,6 +93,7 @@ struct CatalogLibrary {
 extension MCPTool {
     static let stringSchema: [String: Any] = ["type": "string"]
     static let intSchema: [String: Any] = ["type": "integer"]
+    static let boolSchema: [String: Any] = ["type": "boolean"]
 
     static let catalogTools: [MCPTool] = [
         MCPTool(
@@ -111,13 +112,15 @@ extension MCPTool {
         },
         MCPTool(
             name: "search_courses",
-            description: "Search one bundled term. Returns matching courses with title, credits, and attributes.",
+            description: "Search one bundled term. Returns matching courses with title, credits, and attributes. no_prerequisites and no_corequisites keep a course only when its catalog details were loaded and that table is empty. A course whose requisites were not loaded is left out.",
             properties: [
                 "term": stringSchema,
                 "query": stringSchema,
                 "subject": stringSchema,
                 "number": stringSchema,
                 "attribute": stringSchema,
+                "no_prerequisites": boolSchema,
+                "no_corequisites": boolSchema,
                 "limit": intSchema,
             ],
             required: ["term"],
@@ -128,6 +131,9 @@ extension MCPTool {
             let subject = stringArg(arguments, "subject")?.uppercased()
             let number = stringArg(arguments, "number")?.uppercased()
             let attribute = stringArg(arguments, "attribute")?.uppercased()
+            var requisiteFilters = SearchFilters()
+            requisiteFilters.noPrerequisites = boolArg(arguments, "no_prerequisites") == true
+            requisiteFilters.noCorequisites = boolArg(arguments, "no_corequisites") == true
             let limit = min(100, max(1, intArg(arguments, "limit") ?? 25))
             let pool: [Course]
             if query.isEmpty {
@@ -142,6 +148,7 @@ extension MCPTool {
                     let codes = course.attributes.map { $0.uppercased() }
                     if !codes.contains(attribute) { return false }
                 }
+                if !requisiteFilters.matches(course: course) { return false }
                 return true
             }
             return [

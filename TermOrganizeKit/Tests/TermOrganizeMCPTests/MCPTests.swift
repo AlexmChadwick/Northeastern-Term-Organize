@@ -47,6 +47,44 @@ struct MCPToolTests {
         #expect((courses.first?["attributes"] as? [String]) == ["NCFQ"])
     }
 
+    /// A loaded empty table matches. A loaded prerequisite, a loaded corequisite,
+    /// a placement test, and a stub whose details were never fetched do not.
+    @Test func searchCoursesCanRequireKnownEmptyRequisites() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("req-filter-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let server = TermOrganizeMCPServer(
+            library: MCPFixture.requisiteLibrary(),
+            plansURL: directory.appendingPathComponent("UserData.json"),
+            readOnly: true
+        )
+
+        let noPrereqs = try numbers(server.call(name: "search_courses", arguments: [
+            "term": "202730", "no_prerequisites": true,
+        ]))
+        #expect(noPrereqs == ["1800", "1802"])
+
+        let noCoreqs = try numbers(server.call(name: "search_courses", arguments: [
+            "term": "202730", "no_corequisites": true,
+        ]))
+        #expect(noCoreqs == ["1101", "1800", "3000"])
+
+        let both = try numbers(server.call(name: "search_courses", arguments: [
+            "term": "202730", "no_prerequisites": true, "no_corequisites": true,
+        ]))
+        #expect(both == ["1800"])
+
+        let off = try numbers(server.call(name: "search_courses", arguments: ["term": "202730"]))
+        #expect(off == ["1101", "1800", "1802", "3000", "9999"])
+    }
+
+    private func numbers(_ result: [String: Any]) throws -> [String] {
+        #expect(result["isError"] as? Bool != true, "search_courses failed: \(result)")
+        let payload = (result["structuredContent"] as? [String: Any]) ?? [:]
+        let courses = payload["courses"] as? [[String: Any]] ?? []
+        return courses.compactMap { $0["number"] as? String }.sorted()
+    }
+
     @Test func searchBySubjectNumberAndAttribute() throws {
         let result = try call("search_courses", ["term": "202730", "subject": "cs", "number": "3500", "attribute": "ncfq"])
         let courses = result["courses"] as? [[String: Any]] ?? []
@@ -956,6 +994,20 @@ enum MCPFixture {
         return nil
     }
 
+    /// One term with a known-empty course, a prerequisite, a corequisite, a placement
+    /// test, and a stub whose nil requisites are unknown.
+    static func requisiteLibrary() -> CatalogLibrary {
+        CatalogLibrary(indexes: [
+            "202730": CatalogIndex.build(catalog(term: "202730", courses: [
+                course("CS", "1800", "Discrete", [], detailsLoaded: true),
+                course("CS", "1802", "Seminar", [], coreqs: .course(CourseKey(subject: "CS", number: "1800"))),
+                course("CS", "1101", "Lab", [], prereqs: .test(name: "Math Placement", score: 30)),
+                course("CS", "3000", "Algorithms", ["NCFQ"], prereqs: .course(CourseKey(subject: "CS", number: "1800"))),
+                course("CS", "9999", "Stub", [], detailsLoaded: false),
+            ], sections: [])),
+        ])
+    }
+
     static func library() -> CatalogLibrary {
         CatalogLibrary(indexes: [
             "202710": CatalogIndex.build(catalog(term: "202710", courses: [
@@ -1001,12 +1053,15 @@ enum MCPFixture {
         )
     }
 
-    private static func course(_ subject: String, _ number: String, _ title: String, _ attributes: [String]) -> Course {
+    private static func course(
+        _ subject: String, _ number: String, _ title: String, _ attributes: [String],
+        prereqs: Requisite? = nil, coreqs: Requisite? = nil, detailsLoaded: Bool = true
+    ) -> Course {
         Course(
             subject: subject, number: number, title: title, description: title,
             minCredits: 4, maxCredits: 4, attributes: attributes,
-            prereqs: nil, coreqs: nil, postreqs: [], specialTopics: false,
-            college: nil, department: nil, detailsLoaded: true
+            prereqs: prereqs, coreqs: coreqs, postreqs: [], specialTopics: false,
+            college: nil, department: nil, detailsLoaded: detailsLoaded
         )
     }
 

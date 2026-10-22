@@ -85,6 +85,22 @@ import Testing
         #expect(plan.courses[0].credits == 3)
     }
 
+    @Test func missingScheduleCreditsStayUnsetUntilTheUserChooses() throws {
+        let course = readings()
+        let term = Term(code: "202730", bannerDescription: "Spring 2027 Semester")
+        let index = CatalogIndex.build(TermCatalog(
+            term: term, courses: [course], sections: [], subjects: [], attributes: [], campuses: []
+        ))
+        var plan = SchedulePlan(name: "Plan A", termCode: term.code)
+        plan.courses = [PlanCourse(key: course.key, colorIndex: 0, credits: nil)]
+        let stamp = Date(timeIntervalSince1970: 1_700_000_000)
+        plan.updatedAt = stamp
+        #expect(!ChosenCreditReconcile.reconcile(&plan, index: index))
+        #expect(plan.courses[0].credits == nil)
+        #expect(plan.updatedAt == stamp)
+        #expect(ChosenCredits.resolved(stored: plan.courses[0].credits, course: course, section: nil) == 4)
+    }
+
     @Test func missingCreditsDecodeAndFillTheDefault() throws {
         let json = """
         {"key":{"subject":"CS","number":"8982"},"isRequired":true,"excludedCRNs":[],"colorIndex":0}

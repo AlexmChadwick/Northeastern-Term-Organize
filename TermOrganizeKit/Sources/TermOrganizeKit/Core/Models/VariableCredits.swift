@@ -108,12 +108,13 @@ enum ChosenCredits {
         return Int(resolved(stored: stored, course: course, section: section).rounded())
     }
 
-    /// Fills a missing schedule choice and clamps one that left the range.
+    /// A missing choice stays missing, so a launch can show the default without
+    /// writing it. A stored choice outside the current range is clamped.
     /// An in-range choice is returned unchanged.
     static func reconciled(stored: Double?, course: Course?, section: CourseSection?) -> Double? {
+        guard let stored else { return nil }
         guard let span = span(course: course, section: section) else { return stored }
-        let resolved = span.resolve(stored: stored)
-        return resolved
+        return span.clamp(stored)
     }
 }
 
@@ -194,8 +195,8 @@ enum CreditSync {
 }
 
 enum ChosenCreditReconcile {
-    /// Fills a missing schedule choice with the default and clamps a choice the
-    /// new range no longer contains. An in-range choice is left as the student set it.
+    /// Clamps a stored choice the catalog range no longer contains.
+    /// A missing choice stays missing. Readers use `ChosenCredits.resolved`.
     @discardableResult
     static func reconcile(_ plan: inout SchedulePlan, index: CatalogIndex) -> Bool {
         var changed = false

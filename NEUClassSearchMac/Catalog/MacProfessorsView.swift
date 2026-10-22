@@ -178,8 +178,7 @@ struct MacProfessorsView: View {
             columns(index: index)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
-        .focusable()
-        .focusSection()
+        .macFocusesOnClick()
         .macScrollsTableSelectionIntoView(when: selection)
         .contextMenu(forSelectionType: String.self) { names in
             if !names.isEmpty {

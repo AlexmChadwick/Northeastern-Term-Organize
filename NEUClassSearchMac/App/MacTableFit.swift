@@ -11,6 +11,14 @@ import AppKit
 import SwiftUI
 
 extension View {
+    /// A click in this table or list makes it the first responder, the way a normal macOS table does.
+    /// Up and Down then move its selection. A click outside it, including the sidebar and the search
+    /// field, leaves focus where it is. This watches mouse clicks in this window only. It does not
+    /// monitor keys, and it does not consume the click, so the table's own selection still runs.
+    func macFocusesOnClick() -> some View {
+        modifier(MacClickFocusModifier())
+    }
+
     /// Asks the AppKit table under this view to scroll its selected row into view when `token` changes.
     /// Arrow keys move the selection natively; this keeps that row on screen after the binding updates.
     func macScrollsTableSelectionIntoView(when token: some Hashable) -> some View {
@@ -110,4 +118,95 @@ private struct MacTableFit: NSViewRepresentable {
         for subview in view.subviews { found += tables(in: subview) }
         return found
     }
+}
+
+/// Binds SwiftUI focus to the table and turns it on when a click lands in that table.
+/// A row that is already selected does not change the selection binding, so focus follows the click.
+private struct MacClickFocusModifier: ViewModifier {
+    @FocusState private var isFocused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .focused($isFocused)
+            .background { MacTableClickFocus { isFocused = true } }
+    }
+}
+
+/// Reports a mouse click whose hit view is the table that contains this anchor.
+/// Local to this process. Key events are not observed, and the click is passed on.
+private struct MacTableClickFocus: NSViewRepresentable {
+    var onClick: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onClick: onClick) }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = MacTableClickPassThrough()
+        context.coordinator.anchor = view
+        context.coordinator.start()
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.anchor = view
+        context.coordinator.onClick = onClick
+        context.coordinator.start()
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    final class Coordinator {
+        var onClick: () -> Void
+        weak var anchor: NSView?
+        var monitor: Any?
+
+        init(onClick: @escaping () -> Void) { self.onClick = onClick }
+
+        func start() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                self?.focusIfClick(event)
+                return event
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        func focusIfClick(_ event: NSEvent) {
+            guard let anchor, let window = event.window, anchor.window === window else { return }
+            guard let table = Self.table(near: anchor) else { return }
+            guard let hit = window.contentView?.hitTest(event.locationInWindow) else { return }
+            guard hit === table || hit.isDescendant(of: table) else { return }
+            if window.firstResponder === table { return }
+            if let view = window.firstResponder as? NSView, view.isDescendant(of: table) { return }
+            window.makeFirstResponder(table)
+            let focus = onClick
+            DispatchQueue.main.async {
+                focus()
+                DispatchQueue.main.async {
+                    guard anchor.window === window, window.firstResponder !== table else { return }
+                    window.makeFirstResponder(table)
+                }
+            }
+        }
+
+        static func table(near view: NSView) -> NSTableView? {
+            var current: NSView? = view
+            while let node = current {
+                if let table = node as? NSTableView { return table }
+                current = node.superview
+            }
+            return MacTableFit.table(containing: view)
+        }
+    }
+}
+
+/// Sits behind the table and never takes the click or keyboard focus.
+private final class MacTableClickPassThrough: NSView {
+    override var acceptsFirstResponder: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

@@ -85,6 +85,52 @@ import Testing
         #expect(plan.courses[0].credits == 3)
     }
 
+    @Test func missingScheduleCreditsStayUnsetUntilTheUserChooses() throws {
+        let course = readings()
+        let term = Term(code: "202730", bannerDescription: "Spring 2027 Semester")
+        let index = CatalogIndex.build(TermCatalog(
+            term: term, courses: [course], sections: [], subjects: [], attributes: [], campuses: []
+        ))
+        var plan = SchedulePlan(name: "Plan A", termCode: term.code)
+        plan.courses = [PlanCourse(key: course.key, colorIndex: 0, credits: nil)]
+        let stamp = Date(timeIntervalSince1970: 1_700_000_000)
+        plan.updatedAt = stamp
+        #expect(!ChosenCreditReconcile.reconcile(&plan, index: index))
+        #expect(plan.courses[0].credits == nil)
+        #expect(plan.updatedAt == stamp)
+        #expect(ChosenCredits.resolved(stored: plan.courses[0].credits, course: course, section: nil) == 4)
+    }
+
+    @Test @MainActor func openingTheAppDoesNotRewriteMissingScheduleCredits() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("UserData-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = UserDataStore(fileURL: url)
+        let course = readings()
+        let term = Term(code: "202730", bannerDescription: "Spring 2027 Semester")
+        let index = CatalogIndex.build(TermCatalog(
+            term: term, courses: [course], sections: [], subjects: [], attributes: [], campuses: []
+        ))
+        let created = store.createPlan(name: "Plan A", termCode: term.code)
+        #expect(store.addCourse(course.key, toPlan: created.id))
+        store.flushNow()
+        let before = try #require(store.plan(id: created.id))
+        #expect(before.courses[0].credits == nil)
+        let stamp = before.updatedAt
+        var reports = 0
+        store.didChange = { reports += 1 }
+        store.reconcileChosenCredits { code in code == term.code ? index : nil }
+        let after = try #require(store.plan(id: created.id))
+        #expect(after.courses[0].credits == nil)
+        #expect(after.updatedAt == stamp)
+        #expect(reports == 0)
+        #expect(ChosenCredits.resolved(stored: after.courses[0].credits, course: course, section: nil) == 4)
+
+        store.setScheduleCourseCredits(planID: created.id, entryID: after.courses[0].id, credits: 6)
+        let edited = try #require(store.plan(id: created.id))
+        #expect(edited.courses[0].credits == 6)
+        #expect(edited.updatedAt > stamp)
+    }
+
     @Test func missingCreditsDecodeAndFillTheDefault() throws {
         let json = """
         {"key":{"subject":"CS","number":"8982"},"isRequired":true,"excludedCRNs":[],"colorIndex":0}

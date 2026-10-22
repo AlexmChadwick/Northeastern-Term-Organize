@@ -22,7 +22,7 @@ struct MacCatalogCourseRow: Identifiable {
     var stats: CourseStats
     /// Why the course matched a search when its title doesn't say ("Taught by Jane Doe").
     var note: String?
-    /// Muted restriction note, such as a CPS-only caption.
+    /// Full CPS sentence for the table tag's tooltip. The cell shows "CPS only".
     var caption: String?
     /// When the course was saved (the saved list).
     var savedAt: Date?
@@ -190,8 +190,7 @@ struct MacCatalogCourseTable: View, Equatable {
             columns
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
-        .focusable()
-        .focusSection()
+        .macFocusesOnClick()
         .macScrollsTableSelectionIntoView(when: selection)
         .contextMenu(forSelectionType: CourseKey.self) { keys in
             if !keys.isEmpty {
@@ -358,19 +357,34 @@ private struct MacCourseTitleCell: View {
     var row: MacCatalogCourseRow
 
     var body: some View {
+        HStack(spacing: 6) {
+            title
+                .lineLimit(1)
+            if let caption = row.caption {
+                Text("CPS only")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.quaternary.opacity(0.7), in: .capsule)
+                    .help(caption)
+                    .accessibilityLabel(caption)
+                    .layoutPriority(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var title: some View {
         if row.course == nil {
             Text("Not in this term's catalog")
                 .foregroundStyle(.secondary)
         } else if let note = row.note {
             Text("\(row.title)\(Text("  \(note)").foregroundStyle(.secondary))")
-                .lineLimit(1)
         } else {
             Text(row.title)
-                .lineLimit(1)
-        }
-        if let caption = row.caption {
-            CatalogCaption(text: caption)
-                .lineLimit(2)
         }
     }
 }

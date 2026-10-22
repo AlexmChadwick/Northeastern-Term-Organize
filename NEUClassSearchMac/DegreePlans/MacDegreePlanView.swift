@@ -99,6 +99,8 @@ struct MacDegreePlanContent: View {
     @AppStorage(MacDegreePlanPane.showsRequirementsKey) private var showsRequirements = true
     /// Remembers the requirements audit and finish milestone between updates.
     @State private var requirementsCache = DegreeRequirementsCache()
+    /// Offering history used to tell when a planned semester can't be taken.
+    @State private var feasibility = DegreePlanFeasibilityModel()
     @State private var suggestionCache = DegreeEquivalenceSuggestionCache()
     @AppStorage(DegreeEquivalenceDismissals.storageKey) private var dismissedSuggestions = ""
 
@@ -111,6 +113,7 @@ struct MacDegreePlanContent: View {
         case export
         case requirementsSetup
         case equivalence(DegreeEquivalenceRequest)
+        case reorganize
 
         var id: String {
             switch self {
@@ -118,6 +121,7 @@ struct MacDegreePlanContent: View {
             case .export: "export"
             case .requirementsSetup: "requirements-setup"
             case .equivalence(let request): "equivalence-\(request.id)"
+            case .reorganize: "reorganize"
             }
         }
     }
@@ -160,6 +164,13 @@ struct MacDegreePlanContent: View {
         return "\(plan?.catalogYear ?? 0)|\(plan?.catalogProgramPath ?? "")"
     }
 
+    private var feasibilityKey: String {
+        let plan = userData.degreePlan(id: planID)
+        let codes = plan?.degreePlanPlannedKeys.map(\.description).sorted().joined(separator: "|") ?? ""
+        let terms = catalog.degreePlanSnapshot().indexes.map(\.term.code).sorted().joined(separator: ",")
+        return codes + "#" + terms
+    }
+
     private var editor: MacDegreePlanEditor {
         MacDegreePlanEditor(userData: userData, planID: planID, undoManager: undoManager)
     }
@@ -189,6 +200,10 @@ struct MacDegreePlanContent: View {
             if let plan = userData.degreePlan(id: planID), plan.catalogProgramPath != nil {
                 await programCatalog.loadRequirements(for: plan)
             }
+        }
+        .task(id: feasibilityKey) {
+            guard let plan = userData.degreePlan(id: planID) else { return }
+            await feasibility.loadIfNeeded(plan: plan, indexes: catalog.degreePlanSnapshot().indexes)
         }
     }
 
@@ -289,6 +304,8 @@ struct MacDegreePlanContent: View {
     private func planList(_ plan: DegreePlan, snapshot: DegreePlanCatalogSnapshot, review: DegreePlanReview,
                           equivalences: CourseEquivalences, requirements: DegreeRequirementsContext,
                           prompts: DegreeEquivalencePrompts) -> some View {
+        let report = feasibility.report(for: plan, snapshot: snapshot)
+        let termWarning = report.warningLine(milestone: requirements.milestone, plan: plan)
         let lastTermWithCourses = plan.terms.lastIndex { !$0.courses.isEmpty }
         let editor = editor
 
@@ -306,7 +323,9 @@ struct MacDegreePlanContent: View {
                         onRetryChecks: { retryCourseInfo() },
                         onSetUpRequirements: { setUpRequirements() },
                         onOpenRequirements: { withAnimation(.snappy) { showsRequirements = true } },
-                        onRetryRequirements: { Task { await programCatalog.loadRequirements(for: plan, forceRefresh: true) } }
+                        onRetryRequirements: { Task { await programCatalog.loadRequirements(for: plan, forceRefresh: true) } },
+                        termWarning: termWarning,
+                        onReorganize: { sheet = .reorganize }
                     )
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
@@ -335,6 +354,8 @@ struct MacDegreePlanContent: View {
                         requirementNote: { requirements.requirementNote(for: $0, semester: term) },
                         onBuildSchedule: { buildSchedule(termID: term.id) },
                         onRemove: { requestRemoval(ofTerm: term.id) },
+                        feasibility: report.report(for: term.id),
+                        onReorganize: { sheet = .reorganize },
                         onDrop: { items, position in drop(items, onto: term, at: position) }
                     )
                     if let milestone = requirements.milestone, milestone.termID == term.id {
@@ -474,6 +495,38 @@ struct MacDegreePlanContent: View {
             MacDegreeRequirementsSetupSheet(planID: planID)
         case .equivalence(let request):
             MacDegreeEquivalenceSheet(request: request)
+        case .reorganize:
+            reorganizeSheet
+        }
+    }
+
+    @ViewBuilder
+    private var reorganizeSheet: some View {
+        if let plan = userData.degreePlan(id: planID) {
+            let snapshot = catalog.degreePlanSnapshot()
+            let report = feasibility.report(for: plan, snapshot: snapshot)
+            DegreePlanReorganizeSheet(
+                plan: plan,
+                hasKnownProblem: !report.infeasibleTerms.isEmpty,
+                load: { await proposeReorganization(of: plan) },
+                onAccept: { applyReorganization($0) }
+            )
+        }
+    }
+
+    private func proposeReorganization(of plan: DegreePlan) async -> DegreePlanReorganization.Proposal? {
+        await DegreePlanReorganization.propose(
+            plan: plan,
+            info: info,
+            requirements: programCatalog.requirements(for: plan),
+            snapshot: catalog.degreePlanSnapshot()
+        )
+    }
+
+    private func applyReorganization(_ changes: [DegreePlanReorganization.Change]) {
+        let count = changes.count
+        editor.perform(count == 1 ? "Reorganize 1 Course" : "Reorganize \(count) Courses") { plan in
+            plan.terms = DegreePlanReorganization.applying(changes, to: plan).terms
         }
     }
 

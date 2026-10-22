@@ -27,6 +27,10 @@ struct MacDegreePlanHeader: View {
     var onSetUpRequirements: () -> Void
     var onOpenRequirements: () -> Void
     var onRetryRequirements: () -> Void
+    /// A semester can't be taken as planned. Shown with a way to reorganize the plan, and in
+    /// place of “On track to finish…” on the requirements card.
+    var termWarning: String? = nil
+    var onReorganize: (() -> Void)? = nil
 
     var body: some View {
         Group {
@@ -100,6 +104,7 @@ struct MacDegreePlanHeader: View {
     private var planHealth: some View {
         VStack(alignment: .leading, spacing: 12) {
             checks
+            termWarningRow
             primaryRow
             ForEach(notes, id: \.self) { note in
                 Text(note)
@@ -111,6 +116,19 @@ struct MacDegreePlanHeader: View {
                 Label("Loading course data for prerequisite checks…", systemImage: "hourglass")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var termWarningRow: some View {
+        if let termWarning, let onReorganize {
+            VStack(alignment: .leading, spacing: 6) {
+                warning(termWarning, systemImage: "exclamationmark.triangle.fill")
+                Button(action: onReorganize) {
+                    Label(DegreePlanReorganizeCopy.action, systemImage: "arrow.triangle.2.circlepath")
+                }
+                .controlSize(.small)
             }
         }
     }
@@ -248,6 +266,7 @@ struct MacDegreePlanHeader: View {
     private var requirementsCard: some View {
         MacDegreeRequirementsCard(
             requirements: requirements,
+            blockedFinish: termWarning,
             onSetUp: onSetUpRequirements,
             onOpen: onOpenRequirements,
             onRetry: onRetryRequirements
@@ -289,6 +308,8 @@ struct MacDegreeStatTrio: View {
 /// what's still open) that opens the full requirements.
 struct MacDegreeRequirementsCard: View {
     var requirements: DegreeRequirementsContext
+    /// Replaces “On track to finish…” when a semester at or before the finish can't be taken.
+    var blockedFinish: String? = nil
     var onSetUp: () -> Void
     var onOpen: () -> Void
     var onRetry: () -> Void
@@ -299,7 +320,9 @@ struct MacDegreeRequirementsCard: View {
         VStack(alignment: .leading, spacing: 10) {
             if requirements.isSetUp {
                 if let audit = requirements.audit {
-                    DegreeRequirementsSummary(context: requirements, audit: audit, openItemLimit: openItemLimit)
+                    DegreeRequirementsSummary(
+                        context: requirements, audit: audit, openItemLimit: openItemLimit, blockedFinish: blockedFinish
+                    )
                     Button("Show Requirements", action: onOpen)
                         .controlSize(.small)
                         .accessibilityHint("Shows every requirement beside the plan")

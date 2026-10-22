@@ -24,6 +24,9 @@ struct MacDegreePlanSemesterSection: View {
     var requirementNote: (DegreePlanCourse) -> String? = { _ in nil }
     var onBuildSchedule: () -> Void
     var onRemove: () -> Void
+    /// Why this semester can't be taken, when it can't.
+    var feasibility: DegreePlanFeasibility.TermReport? = nil
+    var onReorganize: (() -> Void)? = nil
     /// Courses dropped on the semester: at a position between its courses, or (nil) at the end.
     var onDrop: ([MacDegreeCourseDrag], Int?) -> Bool
 
@@ -82,6 +85,7 @@ struct MacDegreePlanSemesterSection: View {
     // MARK: Header
 
     private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(term.name)
                 .font(.title3.weight(.semibold))
@@ -108,6 +112,11 @@ struct MacDegreePlanSemesterSection: View {
                     Label("Add Course…", systemImage: "plus")
                 }
                 buildScheduleItem
+                if feasibility?.isInfeasible == true, let onReorganize {
+                    Button(action: onReorganize) {
+                        Label(DegreePlanReorganizeCopy.action, systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
                 Divider()
                 Button(role: .destructive) {
                     onRemove()
@@ -130,6 +139,10 @@ struct MacDegreePlanSemesterSection: View {
         .dropDestination(for: MacDegreeCourseDrag.self) { items, _ in
             onDrop(items, nil)
         } isTargeted: { isTargeted = $0 }
+        if let feasibility, feasibility.isInfeasible, let onReorganize {
+            DegreePlanTermWarning(report: feasibility, onReorganize: onReorganize)
+        }
+        }
     }
 
     /// "Build Schedule…", or a disabled item that says why it can't be used yet.

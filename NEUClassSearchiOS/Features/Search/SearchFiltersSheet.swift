@@ -156,10 +156,17 @@ struct SearchFiltersSheet: View {
 
     // MARK: Sections
 
+    @ViewBuilder
     private var quickSection: some View {
         Section {
             Toggle("Open seats only", isOn: filter(\.openSeatsOnly))
             Toggle("Honors only", isOn: filter(\.honorsOnly))
+        }
+        Section {
+            Toggle("No prerequisites", isOn: filter(\.noPrerequisites))
+            Toggle("No corequisites", isOn: filter(\.noCorequisites))
+        } footer: {
+            Text("A course matches only when its catalog details were loaded and list none. A course whose requisites have not been loaded yet is left out.")
         }
     }
 

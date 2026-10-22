@@ -78,4 +78,49 @@ struct SearchEngineTests {
             #expect(index.sections(for: result.course.key).contains { filters.matches(section: $0) })
         }
     }
+
+    /// `prereqs == nil` on a stub is unknown. The filters keep a course only when
+    /// details were loaded and that table is empty. A placement test still counts.
+    @Test func noRequisiteFiltersKeepOnlyLoadedEmptyTables() {
+        let none = sample("1800", prereqs: nil, coreqs: nil, detailsLoaded: true)
+        let prereq = sample("3000", prereqs: .course(CourseKey(subject: "CS", number: "1800")), coreqs: nil, detailsLoaded: true)
+        let coreq = sample("1802", prereqs: nil, coreqs: .course(CourseKey(subject: "CS", number: "1800")), detailsLoaded: true)
+        let placement = sample("1101", prereqs: .test(name: "Math Placement", score: 30), coreqs: nil, detailsLoaded: true)
+        let unknown = sample("9999", prereqs: nil, coreqs: nil, detailsLoaded: false)
+        let index = CatalogIndex.build(TermCatalog(
+            term: Term(code: "202730", bannerDescription: "Spring 2027 Semester"),
+            courses: [none, prereq, coreq, placement, unknown],
+            sections: [],
+            subjects: [Subject(code: "CS", name: "Computer Science")],
+            attributes: [],
+            campuses: []
+        ))
+
+        var noPrereqs = SearchFilters()
+        noPrereqs.noPrerequisites = true
+        let prereqCodes = SearchEngine.search(SearchQuery(text: "", filters: noPrereqs), in: index).results.map(\.course.code).sorted()
+        #expect(prereqCodes == ["CS 1800", "CS 1802"])
+        #expect(noPrereqs.activeCount == 1)
+
+        var noCoreqs = SearchFilters()
+        noCoreqs.noCorequisites = true
+        let coreqCodes = SearchEngine.search(SearchQuery(text: "", filters: noCoreqs), in: index).results.map(\.course.code).sorted()
+        #expect(coreqCodes == ["CS 1101", "CS 1800", "CS 3000"])
+
+        var both = SearchFilters()
+        both.noPrerequisites = true
+        both.noCorequisites = true
+        let bothCodes = SearchEngine.search(SearchQuery(text: "", filters: both), in: index).results.map(\.course.code)
+        #expect(bothCodes == ["CS 1800"])
+        #expect(both.activeCount == 2)
+    }
+
+    private func sample(_ number: String, prereqs: Requisite?, coreqs: Requisite?, detailsLoaded: Bool) -> Course {
+        Course(
+            subject: "CS", number: number, title: "Sample", description: "",
+            minCredits: 4, maxCredits: 4, attributes: [],
+            prereqs: prereqs, coreqs: coreqs, postreqs: [],
+            specialTopics: false, college: nil, department: nil, detailsLoaded: detailsLoaded
+        )
+    }
 }

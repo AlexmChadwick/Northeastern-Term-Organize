@@ -53,8 +53,8 @@ enum InstructionFilter: String, CaseIterable, Codable, Identifiable, Sendable {
 }
 
 /// Filters applied to search results. Course-level filters (subject, NUpath,
-/// level, credits) apply to the course; the rest require at least one section
-/// that satisfies all of them.
+/// level, credits, no prerequisites, no corequisites) apply to the course; the
+/// rest require at least one section that satisfies all of them.
 struct SearchFilters: Hashable, Codable, Sendable {
     var subjects: Set<String> = []
     var nupaths: Set<NUPath> = []
@@ -62,6 +62,12 @@ struct SearchFilters: Hashable, Codable, Sendable {
     var levels: Set<Int> = []
     var minCredits: Double?
     var maxCredits: Double?
+    /// Keep a course only when its fetched catalog entry lists no prerequisites.
+    /// A stub whose requisites were never loaded is left out.
+    var noPrerequisites = false
+    /// Keep a course only when its fetched catalog entry lists no corequisites.
+    /// A stub whose requisites were never loaded is left out.
+    var noCorequisites = false
 
     var campuses: Set<String> = []
     var classTypes: Set<String> = []
@@ -83,6 +89,8 @@ struct SearchFilters: Hashable, Codable, Sendable {
         if !nupaths.isEmpty { n += 1 }
         if !levels.isEmpty { n += 1 }
         if minCredits != nil || maxCredits != nil { n += 1 }
+        if noPrerequisites { n += 1 }
+        if noCorequisites { n += 1 }
         if !campuses.isEmpty { n += 1 }
         if !classTypes.isEmpty { n += 1 }
         if honorsOnly { n += 1 }
@@ -109,6 +117,8 @@ struct SearchFilters: Hashable, Codable, Sendable {
         }
         if let minCredits, course.maxCredits < minCredits { return false }
         if let maxCredits, course.minCredits > maxCredits { return false }
+        if noPrerequisites, !course.listsNoPrerequisites { return false }
+        if noCorequisites, !course.listsNoCorequisites { return false }
         return true
     }
 

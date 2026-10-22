@@ -69,10 +69,10 @@ enum DegreePlanEditing {
         plan.terms[destination].courses.insert(moved, at: min(max(0, index), plan.terms[destination].courses.count))
     }
 
-    /// Moves a planned course to the completed list (unless it's already there).
+    /// Moves a planned course onto the completed list. A number already completed stays
+    /// there as its own row, so a second copy is not thrown away.
     static func markCompleted(_ courseID: UUID, in plan: inout DegreePlan) {
         guard let moved = takePlannedCourse(courseID, from: &plan) else { return }
-        if let key = moved.key, plan.completedKeys.contains(key) { return }
         plan.completed.append(moved)
     }
 

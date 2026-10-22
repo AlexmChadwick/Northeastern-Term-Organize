@@ -154,13 +154,13 @@ enum DegreePlanAnalysis {
         return texts.filter { seen.insert($0).inserted }
     }
 
-    /// Courses listed more than once. A planned row is a duplicate of an earlier planned
-    /// row, or of a completed row, when `DegreeCourseRepeats.countsSeparately` says they
-    /// are the same course. Completed rows are compared with each other the same way, so
-    /// two finished listings that do not count separately are flagged even when the number
-    /// never appears in a future term. Another section of the same number is not a
-    /// duplicate when it counts on its own: a different CRN, or (when neither row has a
-    /// CRN) a topics course taken again.
+    /// Courses the plan should warn about. A planned row is a duplicate of an earlier
+    /// planned row, or of a completed row, when `DegreeCourseRepeats.countsSeparately`
+    /// says they are the same course. Completed rows are compared with each other the
+    /// same way. The warning does not stop the row from counting: the audit keeps every
+    /// copy that has credit. Another section of the same number is not a duplicate when
+    /// it counts on its own: a different CRN, or (when neither row has a CRN) a topics
+    /// course taken again.
     static func duplicateKeys(in plan: DegreePlan) -> Set<CourseKey> {
         let planned = plan.terms.flatMap(\.courses)
         let completed = plan.completed
@@ -339,15 +339,18 @@ enum DegreePlanAutofill {
                 draft.terms.append(DegreePlanTerm(season: season, year: term.calendarYear))
                 termPosition = draft.terms.count - 1
             }
-            var existing = draft.terms[termPosition].courses + draft.completed
+            var unmatched = draft.terms[termPosition].courses + draft.completed
             for planCourse in plan.courses {
                 let crn = chosenCRN(planCourse, in: plan, index: index)
-                let represented = existing.contains { row in
+                // One schedule row lines up with one degree-plan row. A second copy of the
+                // same number is not absorbed by the first, even when neither has a CRN.
+                if let match = unmatched.firstIndex(where: { row in
                     guard row.key == planCourse.key else { return false }
-                    if crn == nil || row.crn == nil { return true }
-                    return row.crn == crn
+                    return Self.sameSection(row.crn, crn)
+                }) {
+                    unmatched.remove(at: match)
+                    continue
                 }
-                if represented { continue }
                 let course = index?.course(planCourse.key)
                 let added = DegreePlanCourse(
                     key: planCourse.key,
@@ -356,11 +359,19 @@ enum DegreePlanAutofill {
                     crn: crn
                 )
                 draft.terms[termPosition].courses.append(added)
-                existing.append(added)
             }
         }
         draft.sortTerms()
         return draft
+    }
+
+    /// Whether two copied rows name the same section. Nil and a blank CRN are the same.
+    private static func sameSection(_ stored: String?, _ incoming: String?) -> Bool {
+        func pin(_ value: String?) -> String? {
+            guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+            return trimmed
+        }
+        return pin(stored) == pin(incoming)
     }
 
     /// The section a schedule row should copy onto a degree plan. A stored pin wins.

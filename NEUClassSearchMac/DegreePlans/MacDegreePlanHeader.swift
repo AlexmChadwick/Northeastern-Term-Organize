@@ -150,8 +150,8 @@ struct MacDegreePlanHeader: View {
                 if review.duplicateCount > 0 {
                     warning(
                         review.duplicateCount == 1
-                            ? "1 course appears more than once in this plan"
-                            : "\(review.duplicateCount) courses appear more than once in this plan",
+                            ? "1 course appears more than once in this plan. Each copy still counts."
+                            : "\(review.duplicateCount) courses appear more than once in this plan. Each copy still counts.",
                         systemImage: "square.on.square"
                     )
                 }

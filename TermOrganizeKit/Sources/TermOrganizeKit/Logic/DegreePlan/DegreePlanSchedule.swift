@@ -14,17 +14,58 @@ extension UserDataStore {
     /// term that already holds exactly the semester's courses, else a new one named like the
     /// semester (`Spring 2027 plan`) with them added. Nil when the semester has no catalog courses.
     func scheduleForDegreePlan(_ semester: DegreePlanTerm, termCode: String) -> (plan: SchedulePlan, isNew: Bool, courseCount: Int)? {
-        var seen = Set<CourseKey>()
-        let keys = semester.courses.compactMap(\.key).filter { seen.insert($0).inserted }
-        guard !keys.isEmpty else { return nil }
-        if let existing = plans(in: termCode).first(where: { Set($0.courses.map(\.key)) == Set(keys) }) {
-            return (existing, false, keys.count)
+        let rows = Self.scheduleRows(for: semester)
+        guard !rows.isEmpty else { return nil }
+        let wanted = rows.map { ScheduleRowSignature(key: $0.key.description, crn: $0.crn, instance: $0.instance) }.sorted()
+        if let existing = plans(in: termCode).first(where: { Self.signature(of: $0) == wanted }) {
+            return (existing, false, rows.count)
         }
         let name = DegreePlanEditing.scheduleName(for: semester, existing: plans(in: termCode).map(\.name))
         let schedule = createPlan(name: name, termCode: termCode)
-        for key in keys {
-            addCourse(key, toPlan: schedule.id)
+        updatePlan(id: schedule.id) { plan in
+            for row in rows {
+                var course = PlanCourse(key: row.key, colorIndex: plan.courses.count, pinnedCRN: row.crn)
+                course.instance = row.instance
+                plan.courses.append(course)
+            }
         }
-        return (plan(id: schedule.id) ?? schedule, true, keys.count)
+        return (plan(id: schedule.id) ?? schedule, true, rows.count)
+    }
+
+    /// One schedule row per degree-plan row. A second copy with no CRN gets `instance`
+    /// so its id is not the same as the first row's.
+    private static func scheduleRows(for semester: DegreePlanTerm) -> [(key: CourseKey, crn: String?, instance: Int?)] {
+        var seen = [CourseKey: Int]()
+        var rows: [(key: CourseKey, crn: String?, instance: Int?)] = []
+        for course in semester.courses {
+            guard let key = course.key else { continue }
+            let trimmed = course.crn?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let crn = (trimmed?.isEmpty == false) ? trimmed : nil
+            var instance: Int? = nil
+            if crn == nil {
+                let count = (seen[key] ?? 0) + 1
+                seen[key] = count
+                if count > 1 { instance = count }
+            }
+            rows.append((key, crn, instance))
+        }
+        return rows
+    }
+
+    private static func signature(of plan: SchedulePlan) -> [ScheduleRowSignature] {
+        plan.courses.map { ScheduleRowSignature(key: $0.key.description, crn: $0.pinnedCRN, instance: $0.instance) }.sorted()
+    }
+}
+
+/// Identity of one schedule row when a degree-plan semester is opened again.
+private struct ScheduleRowSignature: Equatable, Comparable {
+    var key: String
+    var crn: String?
+    var instance: Int?
+
+    static func < (lhs: ScheduleRowSignature, rhs: ScheduleRowSignature) -> Bool {
+        if lhs.key != rhs.key { return lhs.key < rhs.key }
+        if lhs.crn != rhs.crn { return (lhs.crn ?? "") < (rhs.crn ?? "") }
+        return (lhs.instance ?? 0) < (rhs.instance ?? 0)
     }
 }

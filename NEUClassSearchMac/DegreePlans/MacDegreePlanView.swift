@@ -767,9 +767,7 @@ struct MacDegreePlanContent: View {
         guard let plan = userData.degreePlan(id: planID) else { return false }
         let mine = items.filter { $0.planID == planID }
         let moves = mine.compactMap(\.courseID)
-        // A course the plan already has isn't added again.
-        let planned = Set(plan.degreePlanCourseKeys)
-        let additions = mine.compactMap(\.addition).filter { !planned.contains($0.key) }
+        let additions = mine.compactMap(\.addition)
         guard !moves.isEmpty || !additions.isEmpty else { return false }
 
         let name: String
@@ -793,7 +791,7 @@ struct MacDegreePlanContent: View {
                 if let courseID = item.courseID {
                     DegreePlanEditing.move(courseID, toTerm: term.id, at: index, in: &plan)
                     index += 1
-                } else if let addition = item.addition, !planned.contains(addition.key) {
+                } else if let addition = item.addition {
                     let course = DegreePlanCourse(key: addition.key, title: addition.title, credits: addition.credits)
                     DegreePlanEditing.add(course, toTerm: term.id, in: &plan)
                     DegreePlanEditing.move(course.id, toTerm: term.id, at: index, in: &plan)

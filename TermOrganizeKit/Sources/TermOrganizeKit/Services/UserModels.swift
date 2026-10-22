@@ -75,9 +75,15 @@ struct PlanCourse: Codable, Hashable, Identifiable, Sendable {
     /// Nil on plans saved before the choice lived on the row; `selectedCRNs` still
     /// holds it then. Optional so those plans still decode.
     var pinnedCRN: String? = nil
-    /// `CS 4973`, or `CS 4973|11111` once a CRN is chosen, so two topics are two rows.
+    /// Set when a degree plan copies a second row of the same number that has no CRN,
+    /// so the schedule keeps both rows. Nil on every other row. Optional so older
+    /// plans still decode.
+    var instance: Int? = nil
+    /// `CS 4973`, `CS 4973|11111` once a CRN is chosen, or `CS 4973 (2)` for another
+    /// copy that has no CRN.
     var id: String {
         if let pinnedCRN, !pinnedCRN.isEmpty { return "\(key.description)|\(pinnedCRN)" }
+        if let instance, instance > 1 { return "\(key.description) (\(instance))" }
         return key.description
     }
 }

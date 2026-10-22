@@ -348,13 +348,14 @@ struct DegreePlanCourse: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// What `DegreePlanTerm.include` did with one course row.
+/// What `DegreePlanTerm.include` did with one course row. The current `include`
+/// always appends a row and returns `.added`.
 enum DegreeCourseAdmission: Equatable, Sendable {
     /// A new row was appended.
     case added
-    /// The CRN was stored on a row that did not have one yet.
+    /// Kept so older callers still compile. `include` does not return this.
     case pinnedExisting
-    /// The number was already present, or this CRN was already stored.
+    /// Kept so older callers still compile. `include` does not return this.
     case alreadyPresent
 }
 
@@ -371,31 +372,14 @@ struct DegreePlanTerm: Codable, Hashable, Identifiable, Sendable {
     var shortName: String { "\(season.shortName) \(year)" }
     var credits: Double { courses.reduce(0) { $0 + $1.credits } }
 
-    /// Adds a row, or stores `crn` on the one row of that course that does not
-    /// have one yet. A second row is created only when the new course has a CRN,
-    /// every existing row of that subject and number already has a different CRN,
-    /// and this CRN is not already stored. A missing CRN never creates a second row.
+    /// Appends the row. The same subject and number may appear again with or without
+    /// a CRN. A repeat that is not its own topic is a warning on the plan. The audit
+    /// still counts every copy that has credit.
     @discardableResult
     mutating func include(course newCourse: DegreePlanCourse) -> DegreeCourseAdmission {
-        guard let key = newCourse.key else {
-            courses.append(newCourse)
-            return .added
-        }
-        let trimmed = newCourse.crn?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let pin = (trimmed?.isEmpty == false) ? trimmed : nil
-        let rows = courses.indices.filter { courses[$0].key == key }
-        if pin == nil {
-            guard rows.isEmpty else { return .alreadyPresent }
-            courses.append(newCourse)
-            return .added
-        }
-        if rows.contains(where: { courses[$0].crn == pin }) { return .alreadyPresent }
-        if let open = rows.first(where: { courses[$0].crn?.isEmpty != false }) {
-            courses[open].crn = pin
-            return .pinnedExisting
-        }
         var copy = newCourse
-        copy.crn = pin
+        let trimmed = copy.crn?.trimmingCharacters(in: .whitespacesAndNewlines)
+        copy.crn = (trimmed?.isEmpty == false) ? trimmed : nil
         courses.append(copy)
         return .added
     }

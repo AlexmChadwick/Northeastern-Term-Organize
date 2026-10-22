@@ -28,7 +28,7 @@ extension MCPTool {
         ], required: ["plan_id", "name", "expected_revision"], readOnly: false) { arguments, server in
             try server.renamePlan(arguments)
         },
-        MCPTool(name: "add_course", description: "Add a catalog course to a term of a saved plan. The same subject and number can be added again only when crn is set and differs from every row already stored. Without crn, a number already in the term is left unchanged. The same crn twice is not added.", properties: [
+        MCPTool(name: "add_course", description: "Add a catalog course to a term of a saved plan. The same subject and number can be added again, with or without a crn. A repeat that is not its own topic is listed under validation.duplicates. Each copy still counts.", properties: [
             "plan_id": stringSchema, "term": stringSchema, "subject": stringSchema, "number": stringSchema,
             "crn": stringSchema, "expected_revision": intSchema,
         ], required: ["plan_id", "term", "subject", "number", "expected_revision"], readOnly: false) { arguments, server in
@@ -40,7 +40,7 @@ extension MCPTool {
         ], required: ["plan_id", "term", "subject", "number", "expected_revision"], readOnly: false, destructive: true) { arguments, server in
             try server.removeCourse(arguments)
         },
-        MCPTool(name: "move_course", description: "Move a course from one term of a saved plan to another.", properties: [
+        MCPTool(name: "move_course", description: "Move every row of a course from one term of a saved plan to another. Each row stays its own row in the destination, including a second copy with no crn.", properties: [
             "plan_id": stringSchema, "subject": stringSchema, "number": stringSchema,
             "from_term": stringSchema, "to_term": stringSchema, "expected_revision": intSchema,
         ], required: ["plan_id", "subject", "number", "from_term", "to_term", "expected_revision"], readOnly: false) { arguments, server in
@@ -378,9 +378,16 @@ extension TermOrganizeMCPServer {
             termRow["courses"] = courses
             terms.append(termRow)
         }
+        let duplicates = DegreePlanAnalysis.duplicateKeys(in: plan).sorted { $0.description < $1.description }.map { key in
+            [
+                "subject": key.subject,
+                "number": key.number,
+                "message": "\(key.description) appears more than once. Each copy still counts.",
+            ]
+        }
         var payload = degreeSummary(plan)
         payload["terms"] = terms
-        payload["validation"] = ["clashes": clashes, "not_offered": notOffered]
+        payload["validation"] = ["clashes": clashes, "not_offered": notOffered, "duplicates": duplicates]
         return payload
     }
 
@@ -437,13 +444,18 @@ extension TermOrganizeMCPServer {
             throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in this term of the plan.")
         }
         if matches.count > 1 {
-            guard let crn else {
+            if let crn {
+                guard let index = matches.first(where: { term.courses[$0].crn == crn }) else {
+                    throw MCPToolError(code: "unknown_crn", message: "CRN \(crn) is not a chosen section of \(key.description) in this term.")
+                }
+                term.courses.remove(at: index)
+                return
+            }
+            let undistinguished = matches.allSatisfy { term.courses[$0].crn?.isEmpty != false }
+            guard undistinguished else {
                 throw MCPToolError(code: "invalid_argument", message: "\(key.description) is in this term more than once. Pass crn to name the row to remove.")
             }
-            guard matches.contains(where: { term.courses[$0].crn == crn }) else {
-                throw MCPToolError(code: "unknown_crn", message: "CRN \(crn) is not a chosen section of \(key.description) in this term.")
-            }
-            term.courses.removeAll { $0.key == key && $0.crn == crn }
+            term.courses.remove(at: matches[0])
             return
         }
         if let crn, term.courses[matches[0]].crn != crn {

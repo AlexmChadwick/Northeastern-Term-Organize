@@ -22,7 +22,7 @@ Build and client snippets are in the README section [Local MCP server](../README
 - create_plan {name, terms?: ["202710","202730"]}, a list of term strings.
 - reorganize_plan accepts either {plan_id} or {plan:{terms:[{term, courses:[{subject, number, crn?}]}]}}. It returns {moves:[{subject, number, crn?, from_term, to_term, reason}], unresolved:[{subject, number, crn?, reason}], plan:{...}}.
 - Reorganize rule, the same everywhere: a course moves only into a term the plan already has. The target term's bundled catalog must offer the course, prerequisite order within the plan must be kept, and it never adds a semester. An unpinned course is offered in a term when that term has at least one section of its subject and number. A course with a crn is offered only when that CRN is a section of it in that term. Two rows with different CRNs are different sections, even when they share a subject and number. Two unpinned rows of the same number collapse to the first.
-- Duplicate course numbers: a saved term may contain the same subject and number more than once only when every row has its own crn and the crns differ. add_course without a crn does not create a second row. The same crn twice is not stored. set_section changes one row and does not clear another row's crn. suggest_schedule does not merge two such rows.
+- Duplicate course numbers: add_course appends another row of the same subject and number, with or without a crn. A repeat that is not its own topic (the same crn, or no crn and not a topics title) is listed in `validation.duplicates`. Each copy still counts. set_section changes one row and does not clear another row's crn. suggest_schedule does not merge two pinned rows.
 - Shared fixture: tests/fixtures/mcp-reorganize-fixture.json. It is a plan with CS 4805, CS 2535, CS 2700, CS 4130 and CS 2701 in Fall 2026, plus an empty Spring 2027. Each server must have a test that checks its output against the expected moves. Work out the expected result from the bundled 202730 catalog and the prereqs, and write it into the fixture. Include in your report the per-course reasoning: offered in 202730 yes/no, and prereq status.
 - Storage failures: if the plan file exists but can't be read (permission denied, sandbox, malformed JSON, unknown newer version), every plan tool returns storage_error with the path and reason. NEVER treat a read failure as an empty plan list, and NEVER write over a file you couldn't read. A missing file is the only case that counts as empty.
 
@@ -411,11 +411,10 @@ Required: `plan_id`, `name`, `expected_revision`.
 Required: `plan_id`, `term`, `subject`, `number`, `expected_revision`. Optional: `crn`.
 Creates the term on the plan if it is not there yet.
 
-The same subject and number may be added again only when `crn` is set, every row
-of that number already has its own `crn`, and the new `crn` is different. Without
-`crn`, a number already in the term is left as it is. Passing a `crn` when the
-only row has none stores that `crn` on the existing row and does not add a second
-row. The same `crn` twice does not add a row.
+The same subject and number may be added again, with or without `crn`. A second
+row is always stored. It is not folded into a row that has no `crn`. When the
+copies are not separate topics, `validation.duplicates` names the course and says
+each copy still counts. Different CRNs are not a warning.
 
 ### `remove_course`
 
@@ -434,8 +433,8 @@ id still resolves.
 Required: `plan_id`, `subject`, `number`, `from_term`, `to_term`, `expected_revision`.
 The course must already be in `from_term`. Every row of that subject and number
 moves. A chosen CRN stays on its row only when that same CRN is a section of the
-course in `to_term`. A row whose CRN is not offered there moves without a CRN, and
-a missing CRN does not create a second row when `to_term` already has that number.
+course in `to_term`. A row whose CRN is not offered there moves without a CRN.
+Each moved row is appended, including a second copy that has no CRN.
 
 ### `set_section`
 

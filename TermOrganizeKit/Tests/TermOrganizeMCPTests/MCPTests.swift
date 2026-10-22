@@ -381,6 +381,7 @@ struct MCPToolTests {
             "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "22222", "expected_revision": 3,
         ])
         let topics = courses(in: both, term: "202730").filter { $0["number"] as? String == "4973" }
+        #expect(topics.count == 3)
         #expect(Set(topics.compactMap { $0["crn"] as? String }) == ["11111", "22222"])
 
         let ambiguous = server.call(name: "remove_course", arguments: [
@@ -406,8 +407,9 @@ struct MCPToolTests {
             "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "11111", "expected_revision": 4,
         ])
         let left = courses(in: removed, term: "202730").filter { $0["number"] as? String == "4973" }
-        #expect(left.count == 1)
-        #expect(left.first?["crn"] as? String == "22222")
+        #expect(left.count == 2)
+        #expect(left.contains { $0["crn"] == nil })
+        #expect(left.contains { $0["crn"] as? String == "22222" })
     }
 
     @Test func moveCourse() throws {
@@ -440,42 +442,46 @@ struct MCPToolTests {
         #expect(bad["isError"] as? Bool == true)
     }
 
-    /// The same subject and number is two rows only when each row has its own CRN.
+    /// A second copy is stored and warned. Different CRNs are two rows and are not a warning.
     @Test func duplicateCourseNumbersNeedDistinctCRNs() throws {
         let id = try planID(try call("create_plan", ["name": "Topics", "terms": ["202730"]]))
         let plain = try call("add_course", [
             "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "expected_revision": 1,
         ])
-        _ = try call("add_course", [
+        let again = try call("add_course", [
             "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "expected_revision": 2,
         ])
         let plainCourses = ((plain["terms"] as? [[String: Any]])?.first?["courses"] as? [[String: Any]]) ?? []
-        let stillPlain = try call("get_plan", ["plan_id": id])
-        let plainAfter = ((stillPlain["terms"] as? [[String: Any]])?.first?["courses"] as? [[String: Any]]) ?? []
+        let plainAfter = ((again["terms"] as? [[String: Any]])?.first?["courses"] as? [[String: Any]]) ?? []
         #expect(plainCourses.count == 1)
-        #expect(plainAfter.count == 1)
-        #expect(plainAfter.first?["crn"] == nil)
+        #expect(plainAfter.count == 2)
+        #expect(plainAfter.allSatisfy { $0["crn"] == nil })
+        let warned = ((again["validation"] as? [String: Any])?["duplicates"] as? [[String: Any]]) ?? []
+        #expect(warned.contains { $0["subject"] as? String == "CS" && $0["number"] as? String == "3000" })
+        #expect((warned.first?["message"] as? String)?.contains("Each copy still counts.") == true)
 
-        _ = try call("add_course", [
-            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "expected_revision": 3,
+        let firstTopic = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "11111", "expected_revision": 3,
         ])
-        let pinned = try call("add_course", [
-            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "11111", "expected_revision": 4,
+        let secondTopic = try call("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "22222", "expected_revision": 4,
         ])
-        let oneTopic = courses(in: pinned, term: "202730").filter { $0["number"] as? String == "4973" }
-        #expect(oneTopic.count == 1)
-        #expect(oneTopic.first?["crn"] as? String == "11111")
+        let topics = courses(in: secondTopic, term: "202730").filter { $0["number"] as? String == "4973" }
+        #expect(topics.count == 2)
+        #expect(Set(topics.compactMap { $0["crn"] as? String }) == ["11111", "22222"])
+        let topicWarnings = ((secondTopic["validation"] as? [String: Any])?["duplicates"] as? [[String: Any]]) ?? []
+        #expect(!topicWarnings.contains { $0["number"] as? String == "4973" })
+        _ = firstTopic
 
         let same = try call("add_course", [
             "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "11111", "expected_revision": 5,
         ])
-        #expect(courses(in: same, term: "202730").filter { $0["number"] as? String == "4973" }.count == 1)
-
-        let both = try call("add_course", [
-            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "22222", "expected_revision": 6,
+        #expect(courses(in: same, term: "202730").filter { $0["number"] as? String == "4973" }.count == 3)
+        let sameWarnings = ((same["validation"] as? [String: Any])?["duplicates"] as? [[String: Any]]) ?? []
+        #expect(sameWarnings.contains { $0["number"] as? String == "4973" })
+        _ = try call("remove_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "11111", "expected_revision": 6,
         ])
-        let topics = courses(in: both, term: "202730").filter { $0["number"] as? String == "4973" }
-        #expect(Set(topics.compactMap { $0["crn"] as? String }) == ["11111", "22222"])
 
         let ambiguous = server.call(name: "set_section", arguments: [
             "plan_id": id, "term": "202730", "subject": "CS", "number": "4973", "crn": "33333", "expected_revision": 7,

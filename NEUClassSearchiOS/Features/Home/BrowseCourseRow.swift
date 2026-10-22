@@ -31,13 +31,14 @@ struct BrowseCourseRow: View {
     var course: Course
     var stats: CourseStats?
     var note: String?
+    var caption: String? = nil
     var saveStyle: BrowseSaveStyle = .toggle
 
     var body: some View {
         let isSaved = userData.isSaved(course.key, termCode: termCode)
         NavigationLink(value: AppRoute.course(termCode: termCode, key: course.key)) {
             HStack(spacing: Theme.Spacing.s) {
-                CourseRow(course: course, stats: stats, note: note)
+                CourseRow(course: course, stats: stats, note: note, caption: caption)
                 // Everywhere except the saved list itself, mark bookmarked courses.
                 if isSaved && saveStyle == .toggle {
                     Image(systemName: "bookmark.fill")

@@ -147,7 +147,7 @@ struct DegreePlanAddCourseSheet: View {
     }
 
     private func courseRow(_ course: Course, plan: DegreePlan, term: DegreePlanTerm) -> some View {
-        let entry = DegreePlanCourse(key: course.key, title: course.title, credits: course.maxCredits)
+        let entry = DegreePlanCourse(key: course.key, title: course.title, credits: course.defaultChoiceCredits)
         return Button {
             add(course)
         } label: {
@@ -214,7 +214,7 @@ struct DegreePlanAddCourseSheet: View {
         let entry = DegreePlanCourse(
             key: course.key,
             title: DegreePlanFormat.exportTitle(course.title),
-            credits: course.maxCredits
+            credits: course.defaultChoiceCredits
         )
         userData.updateDegreePlan(id: planID) { DegreePlanEditing.add(entry, toTerm: termID, in: &$0) }
         haptic.fire(.success)

@@ -23,6 +23,8 @@ Build and client snippets are in the README section [Local MCP server](../README
 - reorganize_plan accepts either {plan_id} or {plan:{terms:[{term, courses:[{subject, number, crn?}]}]}}. It returns {moves:[{subject, number, crn?, from_term, to_term, reason}], unresolved:[{subject, number, crn?, reason}], plan:{...}}.
 - Reorganize rule, the same everywhere: a course moves only into a term the plan already has. The target term's bundled catalog must offer the course, prerequisite order within the plan must be kept, and it never adds a semester. An unpinned course is offered in a term when that term has at least one section of its subject and number. A course with a crn is offered only when that CRN is a section of it in that term. Two rows with different CRNs are different sections, even when they share a subject and number. Two unpinned rows of the same number collapse to the first.
 - Duplicate course numbers: add_course appends another row of the same subject and number, with or without a crn. A repeat that is not its own topic (the same crn, or no crn and not a topics title) is listed in `validation.duplicates`. Each copy still counts. set_section changes one row and does not clear another row's crn. suggest_schedule does not merge two pinned rows.
+- Variable credits: a course is variable when credit_high differs from credit_low. add_course takes optional credits. set_credits sets one row. The value is a whole number inside the range. A fixed-credit course, or a value outside the range, is invalid_argument and nothing is written. get_plan reports the chosen credits plus credit_low and credit_high. Each copy keeps its own value.
+- CPS and level: search_courses and get_course include cps_only, true, false, or null when the restrictions were not loaded. search_courses takes level: all, undergrad, or grad. Undergrad is a course number below 5000. Grad is 5000 and above. It combines with the other filters.
 - Shared fixture: tests/fixtures/mcp-reorganize-fixture.json. It is a plan with CS 4805, CS 2535, CS 2700, CS 4130 and CS 2701 in Fall 2026, plus an empty Spring 2027. Each server must have a test that checks its output against the expected moves. Work out the expected result from the bundled 202730 catalog and the prereqs, and write it into the fixture. Include in your report the per-course reasoning: offered in 202730 yes/no, and prereq status.
 - Storage failures: if the plan file exists but can't be read (permission denied, sandbox, malformed JSON, unknown newer version), every plan tool returns storage_error with the path and reason. NEVER treat a read failure as an empty plan list, and NEVER write over a file you couldn't read. A missing file is the only case that counts as empty.
 
@@ -177,7 +179,12 @@ No arguments.
 ### `search_courses`
 
 Required: `term`. Optional: `query`, `subject`, `number`, `attribute`,
-`no_prerequisites`, `no_corequisites`, `limit` (1 to 100, default 25).
+`no_prerequisites`, `no_corequisites`, `level`, `limit` (1 to 100, default 25).
+
+`level` is `all`, `undergrad`, or `grad`. Omitted and `all` leave the filter off.
+Undergrad keeps a course number below 5000. Grad keeps 5000 and above. Any other
+value is `invalid_argument`. It combines with the other filters, including
+`no_prerequisites` and `no_corequisites`.
 
 `no_prerequisites` and `no_corequisites` are booleans. A course matches only
 when its catalog details were loaded and that table is empty. `prereqs` or
@@ -194,6 +201,9 @@ the filter off. The same rule is `SearchFilters.matches(course:)` in the app.
       "number": "3000",
       "title": "Algorithms",
       "credits": { "min": 4, "max": 4 },
+      "credit_low": 4,
+      "credit_high": 4,
+      "cps_only": null,
       "attributes": ["NCFQ"]
     }
   ]
@@ -203,6 +213,13 @@ the filter off. The same rule is `SearchFilters.matches(course:)` in the app.
 ### `get_course`
 
 Required: `term`, `subject`, `number`.
+
+The course object includes `credit_low`, `credit_high`, and `cps_only`. Each
+section includes `cps_only` too, and `credit_low` / `credit_high` when that
+section stored a credit range. `cps_only` is true when the loaded Must Levels
+are only values starting with `CPS -`, or the loaded Must Colleges list is only
+the College of Professional Studies. Cannot lists do not count. Null means the
+restrictions have not been loaded.
 
 Instructors are `[{"name": "...", "email": "..."}]`. `email` is present only when
 its domain is exactly `northeastern.edu` or `neu.edu`, compared case-insensitively.
@@ -387,12 +404,15 @@ Required: `plan_id` (UUID). Read-only.
 
 Each object in `courses` is one row. `crn` is that row's chosen section, and
 `sections` is that section. Two rows may share a subject and number when their
-`crn` values differ. `sections` is empty when no CRN is chosen. `not_offered`
+`crn` values differ. `sections` is empty when no CRN is chosen. `credits` is the
+value chosen for that row. `credit_low` and `credit_high` are the catalog range
+when the bundled term has the course. A variable course has a high end that
+differs from the low end. `not_offered`
 lists courses that have no sections in that bundled term. `clashes` lists chosen
 sections whose meetings overlap.
 
-`create_plan`, `rename_plan`, `add_course`, `remove_course`, `move_course`, and
-`set_section` return this same object.
+`create_plan`, `rename_plan`, `add_course`, `remove_course`, `move_course`,
+`set_section`, and `set_credits` return this same object.
 
 ### `create_plan`
 
@@ -408,8 +428,13 @@ Required: `plan_id`, `name`, `expected_revision`.
 
 ### `add_course`
 
-Required: `plan_id`, `term`, `subject`, `number`, `expected_revision`. Optional: `crn`.
+Required: `plan_id`, `term`, `subject`, `number`, `expected_revision`. Optional: `crn`, `credits`.
 Creates the term on the plan if it is not there yet.
+
+`credits`, when sent, is the whole-credit value stored on the new row. Omit it
+and the row starts at Banner's default when that default sits inside the range,
+otherwise the low end. A value outside the range is `invalid_argument` and
+nothing is written. A fixed-credit course accepts only its one value.
 
 The same subject and number may be added again, with or without `crn`. A second
 row is always stored. It is not folded into a row that has no `crn`. When the
@@ -447,6 +472,20 @@ replaces that row's CRN. When it has more than one, `from_crn` names the row to
 change. Omitting it in that case is `invalid_argument` and nothing is written.
 A `crn` already stored on another row is refused, and the other row keeps its
 CRN. `add_course` is what creates a second row.
+
+### `set_credits`
+
+Required: `plan_id`, `term`, `subject`, `number`, `credits`, `expected_revision`.
+Optional: `crn`.
+
+Sets the whole-credit value of one row. The course must be variable credit, with
+`credit_high` different from `credit_low`. `credits` must be a whole number inside
+that range. A fixed-credit course, a fractional value, or a value outside the
+range is `invalid_argument` and nothing is written. Row matching follows
+`remove_course`: when the term has one row of that subject and number, `crn` can
+be omitted. When it has more than one, `crn` names the row. Omitting it then is
+`invalid_argument`. A `crn` that is not on a row is `not_found`. The other row
+keeps its own value.
 
 ### `apply_reorganize`
 

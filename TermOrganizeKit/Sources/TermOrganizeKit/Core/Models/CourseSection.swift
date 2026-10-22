@@ -182,8 +182,26 @@ struct CourseSection: Codable, Hashable, Identifiable, Sendable {
     var description: String?
     var prereqs: Requisite?
     var coreqs: Requisite?
+    /// Section credit range from Banner. Nil on sections saved before it was kept.
+    var creditLow: Double? = nil
+    var creditHigh: Double? = nil
+    /// Banner's `creditHours` default for this section.
+    var creditHours: Double? = nil
+    var creditHourIndicator: String? = nil
+    /// Nil until `getRestrictions` has been read. An empty list was read and has no restrictions.
+    var restrictions: [SectionRestriction]? = nil
 
     var id: String { crn }
+
+    /// Nil when this section was saved before credit fields were stored.
+    var creditSpan: CreditSpan? {
+        guard creditLow != nil || creditHigh != nil || creditHours != nil else { return nil }
+        let low = creditLow ?? creditHours ?? 0
+        let high = creditHigh ?? low
+        return CreditSpan(low: low, high: high, bannerDefault: creditHours)
+    }
+
+    var isVariableCredit: Bool { creditSpan?.isVariable == true }
     var courseKey: CourseKey { CourseKey(subject: subject, number: number) }
 
     var isOpen: Bool { seatsRemaining > 0 }

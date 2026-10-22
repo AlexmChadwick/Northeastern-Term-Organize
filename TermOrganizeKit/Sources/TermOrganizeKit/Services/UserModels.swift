@@ -79,6 +79,10 @@ struct PlanCourse: Codable, Hashable, Identifiable, Sendable {
     /// so the schedule keeps both rows. Nil on every other row. Optional so older
     /// plans still decode.
     var instance: Int? = nil
+    /// Credits chosen for this row when the course is variable. Nil on plans saved
+    /// before the choice existed: those load, then pick up the default. Optional so
+    /// older plans still decode.
+    var credits: Double? = nil
     /// `CS 4973`, `CS 4973|11111` once a CRN is chosen, or `CS 4973 (2)` for another
     /// copy that has no CRN.
     var id: String {
@@ -143,12 +147,12 @@ struct SchedulePlan: Codable, Hashable, Identifiable, Sendable {
     /// in `selectedCRNs` (plans from before `pinnedCRN`) still counts as that
     /// row's pin, so a second topic can be added beside it.
     @discardableResult
-    mutating func include(key: CourseKey, crn: String?, courseCRNs: Set<String> = [], required: Bool = true) -> PlanCourseAdmission {
+    mutating func include(key: CourseKey, crn: String?, courseCRNs: Set<String> = [], required: Bool = true, credits: Double? = nil) -> PlanCourseAdmission {
         let trimmed = crn?.trimmingCharacters(in: .whitespacesAndNewlines)
         let requested: String? = (trimmed?.isEmpty == false) ? trimmed : nil
         let rows = courses.indices.filter { courses[$0].key == key }
         if rows.isEmpty {
-            courses.append(PlanCourse(key: key, isRequired: required, colorIndex: nextColorIndex, pinnedCRN: requested))
+            courses.append(PlanCourse(key: key, isRequired: required, colorIndex: nextColorIndex, pinnedCRN: requested, credits: credits))
             if let requested, !selectedCRNs.contains(requested) { selectedCRNs.append(requested) }
             return .added
         }
@@ -177,7 +181,7 @@ struct SchedulePlan: Codable, Hashable, Identifiable, Sendable {
             return .pinnedExisting
         }
 
-        courses.append(PlanCourse(key: key, isRequired: required, colorIndex: nextColorIndex, pinnedCRN: requested))
+        courses.append(PlanCourse(key: key, isRequired: required, colorIndex: nextColorIndex, pinnedCRN: requested, credits: credits))
         if !selectedCRNs.contains(requested) { selectedCRNs.append(requested) }
         return .added
     }

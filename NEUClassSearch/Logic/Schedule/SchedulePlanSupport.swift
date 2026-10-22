@@ -374,8 +374,10 @@ struct ResolvedPlan {
         var low = 0.0, high = 0.0
         for entry in entries where entry.countsTowardsCredits {
             guard let course = entry.course else { continue }
-            low += course.minCredits
-            high += course.maxCredits
+            let section = entry.planCourse.pinnedCRN.flatMap { pin in entry.allSections.first { $0.crn == pin } }
+            let chosen = ChosenCredits.resolved(stored: entry.planCourse.credits, course: course, section: section)
+            low += chosen
+            high += chosen
         }
         credits = (low, high)
     }

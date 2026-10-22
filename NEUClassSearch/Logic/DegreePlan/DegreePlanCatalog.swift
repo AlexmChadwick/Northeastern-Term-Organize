@@ -43,6 +43,26 @@ struct DegreePlanCatalogSnapshot {
         return nil
     }
 
+    /// The index that has this semester's sections, else the newest that lists the course.
+    func index(for course: DegreePlanCourse, in semester: DegreePlanTerm?) -> CatalogIndex? {
+        if let semester, let term = bannerTerm(for: semester), let index = index(for: term.code), course.key.flatMap(index.course) != nil {
+            return index
+        }
+        if let key = course.key { return index(containing: key) }
+        return nil
+    }
+
+    func creditSpan(for course: DegreePlanCourse, in semester: DegreePlanTerm?) -> CreditSpan? {
+        guard let key = course.key, let index = index(for: course, in: semester) else { return nil }
+        let section = course.crn.flatMap { index.section(crn: $0) }
+        return ChosenCredits.span(course: index.course(key), section: section)
+    }
+
+    func cpsCaption(for course: DegreePlanCourse, in semester: DegreePlanTerm?) -> String? {
+        guard let key = course.key, let index = index(for: course, in: semester) else { return nil }
+        return CPSNote.courseCaption(sections: index.sections(for: key))
+    }
+
     /// The title to show for a plan entry: the catalog's, else the plan's own.
     func title(for course: DegreePlanCourse) -> String {
         if let key = course.key, let title = self.course(key)?.title, !title.isEmpty { return title }

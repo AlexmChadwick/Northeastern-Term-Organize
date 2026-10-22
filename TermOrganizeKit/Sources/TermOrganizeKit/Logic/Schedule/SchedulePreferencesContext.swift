@@ -42,10 +42,10 @@ struct SchedulePreferencesContext: Sendable {
         var byName: [String: ScheduleInstructorOption] = [:]
         for planCourse in plan.courses {
             let course = index.course(planCourse.key)
-            let least = Int((course?.minCredits ?? 0).rounded(.up))
-            let most = Int((course?.maxCredits ?? 0).rounded(.up))
-            if planCourse.isRequired { requiredCredits += least } else { optionalCourseCount += 1 }
-            totalCredits += max(least, most)
+            let pinned = planCourse.pinnedCRN.flatMap { index.section(crn: $0) }
+            let chosen = ChosenCredits.generatorCredits(stored: planCourse.credits, course: course, section: pinned)
+            if planCourse.isRequired { requiredCredits += chosen } else { optionalCourseCount += 1 }
+            totalCredits += chosen
             for section in index.sections(for: planCourse.key) where !planCourse.excludedCRNs.contains(section.crn) {
                 for instructor in section.instructors ?? [] {
                     var option = byName[instructor.name]

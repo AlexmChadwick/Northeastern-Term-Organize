@@ -38,6 +38,8 @@ struct SearchFilterBar: View {
     var body: some View {
         GlassChipBar {
             filtersChip
+            DegreeLevelFilterPicker(filters: $model.filters)
+                .frame(maxWidth: 260)
             openSeatsChip
             honorsChip
             noPrerequisitesChip

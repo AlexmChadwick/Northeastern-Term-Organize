@@ -64,6 +64,8 @@ struct BannerSection: Decodable, Sendable {
     var crossListAvailable: Int?
     var creditHourHigh: Double?
     var creditHourLow: Double?
+    /// `TO` on a variable-credit section. Absent on a fixed section.
+    var creditHourIndicator: String? = nil
     var openSection: Bool?
     var subjectCourse: String?
     var meetingsFaculty: [BannerMeetingFaculty]?

@@ -194,8 +194,12 @@ actor CatalogRepository {
         guard let fresh = live[key], !fresh.isEmpty || !catalog.sections.contains(where: { $0.courseKey == key }) else {
             return catalog
         }
+        let hadDetails = catalog.courses.first { $0.key == key }?.detailsLoaded == true
         CatalogBuilder.applyCourseRefresh(&catalog, course: key, banner: fresh)
         try await fillInstructors(&catalog, crns: catalog.sections.filter { $0.courseKey == key && $0.instructors == nil }.map(\.crn))
+        if hadDetails {
+            try await fillRestrictions(&catalog, crns: catalog.sections.filter { $0.courseKey == key }.map(\.crn))
+        }
         catalog.recomputePostreqs()
         try save(catalog)
         return catalog
@@ -246,6 +250,8 @@ actor CatalogRepository {
             }
         }
         try await fillInstructors(&catalog, crns: sections.filter { $0.instructors == nil }.map(\.crn))
+        let missingRestrictions = catalog.sections.filter { $0.courseKey == key && $0.restrictions == nil }.map(\.crn)
+        try await fillRestrictions(&catalog, crns: missingRestrictions)
         catalog.recomputePostreqs()
         try save(catalog)
         return catalog
@@ -272,6 +278,38 @@ actor CatalogRepository {
         }
         for i in catalog.sections.indices {
             if let instructors = results[catalog.sections[i].crn] { catalog.sections[i].instructors = instructors }
+        }
+    }
+
+    /// Reads restriction lists a few at a time. A failed section keeps whatever
+    /// was already cached (nil when it was never loaded).
+    private func fillRestrictions(_ catalog: inout TermCatalog, crns: [String]) async throws {
+        guard !crns.isEmpty else { return }
+        let termCode = catalog.term.code
+        let client = self.client
+        let results = await withTaskGroup(of: (String, [SectionRestriction]?).self) { group in
+            var out: [String: [SectionRestriction]] = [:]
+            var iterator = crns.makeIterator()
+            func enqueue(_ crn: String) {
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    return (crn, try? await client.fetchRestrictions(term: termCode, crn: crn))
+                }
+            }
+            for _ in 0..<2 {
+                guard let crn = iterator.next() else { break }
+                enqueue(crn)
+            }
+            while let (crn, restrictions) = await group.next() {
+                if let restrictions { out[crn] = restrictions }
+                if let next = iterator.next() { enqueue(next) }
+            }
+            return out
+        }
+        for index in catalog.sections.indices {
+            if let restrictions = results[catalog.sections[index].crn] {
+                catalog.sections[index].restrictions = restrictions
+            }
         }
     }
 }

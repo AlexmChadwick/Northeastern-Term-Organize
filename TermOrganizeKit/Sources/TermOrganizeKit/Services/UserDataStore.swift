@@ -347,6 +347,73 @@ final class UserDataStore {
         return plan
     }
 
+    /// Sets one schedule row's credits and copies that value onto the matching
+    /// degree-plan row. Does not call `updateDegreePlan`, so the two stores
+    /// cannot sync each other in a loop.
+    func setScheduleCourseCredits(planID: UUID, entryID: String, credits: Double) {
+        guard let plan = plan(id: planID),
+              let row = plan.courses.first(where: { $0.id == entryID }) else { return }
+        let identity = CreditSync.scheduleIdentity(row, among: plan.courses)
+        updatePlan(id: planID) { plan in
+            guard let index = plan.courses.firstIndex(where: { $0.id == entryID }) else { return }
+            plan.courses[index].credits = credits
+        }
+        var changed = false
+        for index in degreePlans.indices {
+            for term in degreePlans[index].terms.indices where degreePlans[index].terms[term].degreePlanBannerCode == plan.termCode {
+                if CreditSync.apply(scheduleCredits: credits, identity: identity, to: &degreePlans[index].terms[term].courses) {
+                    degreePlans[index].updatedAt = .now
+                    changed = true
+                }
+            }
+        }
+        for index in plans.indices where plans[index].id != planID && plans[index].termCode == plan.termCode {
+            if let row = plans[index].courses.first(where: { CreditSync.scheduleIdentity($0, among: plans[index].courses) == identity }),
+               row.credits != credits,
+               let courseIndex = plans[index].courses.firstIndex(where: { $0.id == row.id }) {
+                plans[index].courses[courseIndex].credits = credits
+                plans[index].updatedAt = .now
+                changed = true
+            }
+        }
+        if changed { scheduleSave() }
+    }
+
+    /// Copies a degree plan's chosen credits onto matching schedule rows.
+    func syncChosenCredits(fromDegreePlan id: UUID) {
+        guard let degree = degreePlan(id: id) else { return }
+        var changed = false
+        for term in degree.terms {
+            let code = term.degreePlanBannerCode
+            for index in plans.indices where plans[index].termCode == code {
+                if CreditSync.apply(degree: term.courses, to: &plans[index]) {
+                    plans[index].updatedAt = .now
+                    changed = true
+                }
+            }
+        }
+        if changed { plansDidChange() }
+    }
+
+    /// Fills missing schedule credits and clamps choices a refreshed catalog no longer contains.
+    func reconcileChosenCredits(indexForTerm: (String) -> CatalogIndex?) {
+        var changed = false
+        for index in plans.indices {
+            guard let catalog = indexForTerm(plans[index].termCode) else { continue }
+            if ChosenCreditReconcile.reconcile(&plans[index], index: catalog) {
+                plans[index].updatedAt = .now
+                changed = true
+            }
+        }
+        for index in degreePlans.indices {
+            if ChosenCreditReconcile.reconcile(&degreePlans[index], indexForTerm: indexForTerm) {
+                degreePlans[index].updatedAt = .now
+                changed = true
+            }
+        }
+        if changed { plansDidChange() }
+    }
+
     func updateDegreePlan(id: UUID, _ change: (inout DegreePlan) -> Void) {
         guard let i = degreePlans.firstIndex(where: { $0.id == id }) else { return }
         let before = degreePlans[i]

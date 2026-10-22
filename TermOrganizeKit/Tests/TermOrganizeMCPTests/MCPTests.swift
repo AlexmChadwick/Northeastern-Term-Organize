@@ -772,6 +772,130 @@ struct MCPToolTests {
         let row = terms.first { $0["term"] as? String == term }
         return row?["courses"] as? [[String: Any]] ?? []
     }
+
+    @Test func searchReportsCreditRangeAndUnknownCPS() throws {
+        let result = try call("search_courses", ["term": "202730", "subject": "CS", "number": "3000"])
+        let course = try #require((result["courses"] as? [[String: Any]])?.first)
+        #expect(course["credit_low"] as? Double == 4)
+        #expect(course["credit_high"] as? Double == 4)
+        #expect(course["cps_only"] is NSNull)
+        let detail = try call("get_course", ["term": "202730", "subject": "CS", "number": "3000"])
+        let section = try #require((detail["sections"] as? [[String: Any]])?.first)
+        #expect(section["cps_only"] is NSNull)
+    }
+
+    @Test func setCreditsChoosesOneVariableRowAndRefusesTheRest() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("credits-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let server = TermOrganizeMCPServer(library: MCPFixture.creditsLibrary(), plansURL: directory.appendingPathComponent("UserData.json"), readOnly: false)
+        func ok(_ name: String, _ arguments: [String: Any]) throws -> [String: Any] {
+            let result = server.call(name: name, arguments: arguments)
+            #expect(result["isError"] as? Bool != true, "\(name) failed: \(result)")
+            return (result["structuredContent"] as? [String: Any]) ?? [:]
+        }
+        func errorCode(_ name: String, _ arguments: [String: Any]) -> String? {
+            let result = server.call(name: name, arguments: arguments)
+            #expect(result["isError"] as? Bool == true)
+            let error = (result["structuredContent"] as? [String: Any])?["error"] as? [String: Any]
+            return error?["code"] as? String
+        }
+
+        let id = try #require((try ok("create_plan", ["name": "Credits", "terms": ["202730"]]))["id"] as? String)
+        let added = try ok("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "8982", "expected_revision": 1,
+        ])
+        let first = try #require(courses(in: added, term: "202730").first { $0["number"] as? String == "8982" })
+        #expect(first["credits"] as? Double == 4)
+        #expect(first["credit_low"] as? Double == 1)
+        #expect(first["credit_high"] as? Double == 8)
+
+        let chosen = try ok("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "8982", "crn": "10001", "credits": 6, "expected_revision": 2,
+        ])
+        let copies = courses(in: chosen, term: "202730").filter { $0["number"] as? String == "8982" }
+        #expect(copies.count == 2)
+        #expect(copies.map { $0["credits"] as? Double }.sorted { ($0 ?? 0) < ($1 ?? 0) } == [4, 6])
+
+        #expect(errorCode("set_credits", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "8982", "credits": 2, "expected_revision": 3,
+        ]) == "invalid_argument")
+        let unchanged = try ok("get_plan", ["plan_id": id])
+        #expect(unchanged["revision"] as? Int == 3)
+
+        let one = try ok("set_credits", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "8982", "crn": "10001", "credits": 2, "expected_revision": 3,
+        ])
+        let after = courses(in: one, term: "202730").filter { $0["number"] as? String == "8982" }
+        #expect(after.first { $0["crn"] as? String == "10001" }?["credits"] as? Double == 2)
+        #expect(after.first { $0["crn"] == nil }?["credits"] as? Double == 4)
+
+        #expect(errorCode("set_credits", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "8982", "crn": "10001", "credits": 9, "expected_revision": 4,
+        ]) == "invalid_argument")
+        #expect(errorCode("set_credits", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "8982", "crn": "99999", "credits": 2, "expected_revision": 4,
+        ]) == "not_found")
+        let still = try ok("get_plan", ["plan_id": id])
+        #expect(still["revision"] as? Int == 4)
+
+        _ = try ok("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "expected_revision": 4,
+        ])
+        #expect(errorCode("set_credits", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "3000", "credits": 4, "expected_revision": 5,
+        ]) == "invalid_argument")
+        #expect(errorCode("add_course", [
+            "plan_id": id, "term": "202730", "subject": "CS", "number": "8982", "credits": 9, "expected_revision": 5,
+        ]) == "invalid_argument")
+    }
+
+    @Test func searchLevelAndCPSOnly() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("level-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let server = TermOrganizeMCPServer(library: MCPFixture.creditsLibrary(), plansURL: directory.appendingPathComponent("UserData.json"), readOnly: true)
+        func numbers(_ arguments: [String: Any]) throws -> [String] {
+            let result = server.call(name: "search_courses", arguments: arguments)
+            #expect(result["isError"] as? Bool != true, "search failed: \(result)")
+            let payload = (result["structuredContent"] as? [String: Any]) ?? [:]
+            let courses = payload["courses"] as? [[String: Any]] ?? []
+            return courses.compactMap { $0["number"] as? String }.sorted()
+        }
+        var under = ["term": "202730", "level": "undergrad"] as [String: Any]
+        #expect(try numbers(under) == ["1000", "1800", "3000", "4999"])
+        under["no_prerequisites"] = true
+        under["subject"] = "CS"
+        #expect(try numbers(under) == ["3000", "4999"])
+
+        #expect(try numbers(["term": "202730", "level": "grad", "no_prerequisites": true, "subject": "CS"]) == ["5000", "8982"])
+        #expect(try numbers(["term": "202730", "level": "grad", "subject": "CS"]).contains("5200"))
+
+        let bad = server.call(name: "search_courses", arguments: ["term": "202730", "level": "graduate"])
+        let code = ((bad["structuredContent"] as? [String: Any])?["error"] as? [String: Any])?["code"] as? String
+        #expect(bad["isError"] as? Bool == true)
+        #expect(code == "invalid_argument")
+
+        let cps = server.call(name: "get_course", arguments: ["term": "202730", "subject": "ITC", "number": "1000"])
+        let cpsPayload = (cps["structuredContent"] as? [String: Any]) ?? [:]
+        #expect(cpsPayload["cps_only"] as? Bool == true)
+        let cpsSection = (cpsPayload["sections"] as? [[String: Any]])?.first
+        #expect(cpsSection?["cps_only"] as? Bool == true)
+        #expect(cpsSection?["crn"] as? String == "34087")
+
+        let mixed = server.call(name: "get_course", arguments: ["term": "202730", "subject": "CS", "number": "5200"])
+        let mixedPayload = (mixed["structuredContent"] as? [String: Any]) ?? [:]
+        #expect(mixedPayload["cps_only"] as? Bool == false)
+        let mixedSection = (mixedPayload["sections"] as? [[String: Any]])?.first
+        #expect(mixedSection?["cps_only"] as? Bool == false)
+
+        let readings = server.call(name: "search_courses", arguments: ["term": "202730", "subject": "CS", "number": "8982"])
+        let readingsCourse = ((readings["structuredContent"] as? [String: Any])?["courses"] as? [[String: Any]])?.first
+        #expect(readingsCourse?["credit_low"] as? Double == 1)
+        #expect(readingsCourse?["credit_high"] as? Double == 8)
+        #expect(readingsCourse?["default_credits"] as? Double == 4)
+        #expect(readingsCourse?["cps_only"] is NSNull)
+    }
 }
 
 @Suite
@@ -1014,6 +1138,28 @@ enum MCPFixture {
         ])
     }
 
+    /// Variable-credit readings, a CPS-only section, and the 4999/5000 boundary.
+    static func creditsLibrary() -> CatalogLibrary {
+        let cps = [SectionRestriction(kind: .must, category: "Levels", values: ["CPS - Undergraduate Semester (UC)"])]
+        let mixed = [SectionRestriction(kind: .must, category: "Levels", values: ["Graduate", "CPS - Undergraduate Semester (UC)", "Undergraduate"])]
+        return CatalogLibrary(indexes: [
+            "202730": CatalogIndex.build(catalog(term: "202730", courses: [
+                course("CS", "8982", "Readings", [], minCredits: 1, maxCredits: 8, defaultCredits: 4),
+                course("CS", "3000", "Algorithms", ["NCFQ"]),
+                course("CS", "4999", "Boundary", []),
+                course("CS", "5000", "Graduate", []),
+                course("CS", "5200", "Database", [], prereqs: .course(CourseKey(subject: "CS", number: "5000"))),
+                course("CS", "1800", "Stub", [], detailsLoaded: false),
+                course("ITC", "1000", "Intro", []),
+            ], sections: [
+                section(crn: "10001", subject: "CS", number: "8982", day: .monday, email: nil, creditLow: 1, creditHigh: 8, creditHours: 4),
+                section(crn: "2001", subject: "CS", number: "3000", day: .tuesday, email: nil),
+                section(crn: "34087", subject: "ITC", number: "1000", day: .wednesday, email: nil, restrictions: cps),
+                section(crn: "34629", subject: "CS", number: "5200", day: .thursday, email: nil, restrictions: mixed),
+            ])),
+        ])
+    }
+
     static func library() -> CatalogLibrary {
         CatalogLibrary(indexes: [
             "202710": CatalogIndex.build(catalog(term: "202710", courses: [
@@ -1061,17 +1207,22 @@ enum MCPFixture {
 
     private static func course(
         _ subject: String, _ number: String, _ title: String, _ attributes: [String],
-        prereqs: Requisite? = nil, coreqs: Requisite? = nil, detailsLoaded: Bool = true
+        prereqs: Requisite? = nil, coreqs: Requisite? = nil, detailsLoaded: Bool = true,
+        minCredits: Double = 4, maxCredits: Double = 4, defaultCredits: Double? = nil
     ) -> Course {
         Course(
             subject: subject, number: number, title: title, description: title,
-            minCredits: 4, maxCredits: 4, attributes: attributes,
+            minCredits: minCredits, maxCredits: maxCredits, defaultCredits: defaultCredits, attributes: attributes,
             prereqs: prereqs, coreqs: coreqs, postreqs: [], specialTopics: false,
             college: nil, department: nil, detailsLoaded: detailsLoaded
         )
     }
 
-    private static func section(crn: String, subject: String, number: String, day: DaySet, start: Int = 9, email: String?) -> CourseSection {
+    private static func section(
+        crn: String, subject: String, number: String, day: DaySet, start: Int = 9, email: String?,
+        creditLow: Double? = nil, creditHigh: Double? = nil, creditHours: Double? = nil,
+        restrictions: [SectionRestriction]? = nil
+    ) -> CourseSection {
         let meeting = Meeting(
             days: day, start: start * 60, end: (start + 1) * 60,
             buildingCode: "WVH", building: "West Village H", room: "210",
@@ -1085,7 +1236,8 @@ enum MCPFixture {
             classType: "Lecture", honors: false, campus: "Boston",
             instructionMethod: "Traditional", meetings: [meeting],
             instructors: [Instructor(name: "Lovelace, Ada", primary: true, email: email)],
-            crossListCRNs: [], attributes: ["NCFQ"], description: nil, prereqs: nil, coreqs: nil
+            crossListCRNs: [], attributes: ["NCFQ"], description: nil, prereqs: nil, coreqs: nil,
+            creditLow: creditLow, creditHigh: creditHigh, creditHours: creditHours, restrictions: restrictions
         )
     }
 }

@@ -48,15 +48,15 @@ extension ScheduleCourseInput {
         plan.courses.map { planCourse in
             let siblings = plan.courses.filter { $0.key == planCourse.key && $0.id != planCourse.id }
             let course = index.course(planCourse.key)
-            let minCredits = Int((course?.minCredits ?? 0).rounded(.up))
-            let maxCredits = Int((course?.maxCredits ?? 0).rounded(.up))
+            let pinned = planCourse.pinnedCRN.flatMap { index.section(crn: $0) }
+            let chosen = ChosenCredits.generatorCredits(stored: planCourse.credits, course: course, section: pinned)
             if let crn = planCourse.pinnedCRN, !crn.isEmpty {
                 let locked = lockedSections(for: planCourse.key, in: index, pin: crn, fallback: [])
                 return ScheduleCourseInput(
                     key: planCourse.key, isRequired: planCourse.isRequired,
                     sections: locked.sections,
                     excludedCRNs: planCourse.excludedCRNs,
-                    minCredits: minCredits, maxCredits: maxCredits,
+                    minCredits: chosen, maxCredits: chosen,
                     unavailablePin: locked.unavailablePin
                 )
             }
@@ -68,7 +68,7 @@ extension ScheduleCourseInput {
                 key: planCourse.key, isRequired: planCourse.isRequired,
                 sections: allowed.sections,
                 excludedCRNs: planCourse.excludedCRNs,
-                minCredits: minCredits, maxCredits: maxCredits,
+                minCredits: chosen, maxCredits: chosen,
                 unavailablePin: allowed.unavailablePin
             )
         }

@@ -30,7 +30,12 @@ struct MacSavedView: View {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let rows = userData.savedCourses(in: index.term.code).map { item -> MacCatalogCourseRow in
             if let course = index.course(item.key) {
-                return MacCatalogCourseRow(course: course, stats: index.stats(for: item.key), savedAt: item.savedAt)
+                return MacCatalogCourseRow(
+                    course: course,
+                    stats: index.stats(for: item.key),
+                    caption: CPSNote.courseCaption(sections: index.sections(for: item.key)),
+                    savedAt: item.savedAt
+                )
             }
             return MacCatalogCourseRow(missing: item.key, savedAt: item.savedAt)
         }
@@ -132,6 +137,7 @@ struct MacSavedView: View {
             hasher.combine(row.savedAt)
             hasher.combine(row.stats.seatsRemaining)
             hasher.combine(row.stats.openSectionCount)
+            hasher.combine(row.caption)
         }
         return hasher.finalize()
     }

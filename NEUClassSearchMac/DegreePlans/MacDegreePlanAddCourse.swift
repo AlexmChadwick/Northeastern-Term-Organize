@@ -169,7 +169,7 @@ struct MacDegreePlanAddCourse: View {
     }
 
     private func courseRow(_ course: Course, plan: DegreePlan, term: DegreePlanTerm) -> some View {
-        let entry = DegreePlanCourse(key: course.key, title: course.title, credits: course.maxCredits)
+        let entry = DegreePlanCourse(key: course.key, title: course.title, credits: course.defaultChoiceCredits)
         let isHighlighted = highlighted == course.key
         return Button {
             add(course)

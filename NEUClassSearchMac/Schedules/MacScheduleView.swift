@@ -399,7 +399,10 @@ private struct MacScheduleScreen: View {
             editPreferences: { sheet = .preferences },
             generate: { mode = .generator },
             showFilters: { showsFilters = true },
-            paste: { texts in addDropped(texts, to: plan, index: index) }
+            paste: { texts in addDropped(texts, to: plan, index: index) },
+            setCredits: { entryID, credits in
+                userData.setScheduleCourseCredits(planID: plan.id, entryID: entryID, credits: credits)
+            }
         )
     }
 

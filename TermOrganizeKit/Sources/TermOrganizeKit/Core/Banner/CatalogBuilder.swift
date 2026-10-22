@@ -59,7 +59,12 @@ enum CatalogBuilder {
                 attributes: attributes,
                 description: prior?.description,
                 prereqs: prior?.prereqs,
-                coreqs: prior?.coreqs
+                coreqs: prior?.coreqs,
+                creditLow: s.creditHourLow,
+                creditHigh: s.creditHourHigh,
+                creditHours: s.creditHours,
+                creditHourIndicator: s.creditHourIndicator,
+                restrictions: prior?.restrictions
             )
         }
     }
@@ -81,9 +86,14 @@ enum CatalogBuilder {
             }
             let isTopics = sectionAttributes.contains { $0.code == "TOPC" }
 
+            let span = CreditSpan.banner(s)
             if var existing = courses[key] {
                 let codes = Set(existing.attributes).union(sectionAttributes.map(\.code).filter { $0 != honorsAttributeCode })
                 existing.attributes = codes.sorted()
+                let merged = existing.creditSpan.absorb(span)
+                existing.minCredits = merged.low
+                existing.maxCredits = merged.high
+                existing.defaultCredits = merged.bannerDefault
                 if !existing.specialTopics, isTopics {
                     existing.specialTopics = true
                     existing.title = "Special Topics"
@@ -91,14 +101,14 @@ enum CatalogBuilder {
                 courses[key] = existing
             } else {
                 let special = title.localizedCaseInsensitiveContains("Special Topics") || isTopics
-                let low = s.creditHourLow ?? s.creditHours ?? 0
                 courses[key] = Course(
                     subject: s.subject,
                     number: s.courseNumber,
                     title: special ? "Special Topics" : title,
                     description: "",
-                    minCredits: low,
-                    maxCredits: s.creditHourHigh ?? low,
+                    minCredits: span.low,
+                    maxCredits: span.high,
+                    defaultCredits: span.bannerDefault,
                     attributes: sectionAttributes.map(\.code).filter { $0 != honorsAttributeCode }.sorted(),
                     prereqs: nil,
                     coreqs: nil,
@@ -143,6 +153,7 @@ enum CatalogBuilder {
                 // Keep rich details, refresh credit hours and attributes.
                 known.minCredits = stub.minCredits
                 known.maxCredits = stub.maxCredits
+                known.defaultCredits = stub.defaultCredits
                 known.attributes = stub.attributes
                 known.specialTopics = known.specialTopics || stub.specialTopics
                 return known
@@ -150,6 +161,7 @@ enum CatalogBuilder {
             if var borrowed = knowledge[stub.key] {
                 borrowed.minCredits = stub.minCredits
                 borrowed.maxCredits = stub.maxCredits
+                borrowed.defaultCredits = stub.defaultCredits
                 borrowed.attributes = stub.attributes
                 borrowed.specialTopics = borrowed.specialTopics || stub.specialTopics
                 borrowed.postreqs = []
@@ -182,6 +194,14 @@ enum CatalogBuilder {
         catalog.sections.removeAll { $0.courseKey == course }
         catalog.sections.append(contentsOf: fresh)
         catalog.sections.sort { ($0.courseKey, $0.sectionNumber) < ($1.courseKey, $1.sectionNumber) }
+        if let courseIndex = catalog.courses.firstIndex(where: { $0.key == course }), !banner.isEmpty {
+            let (stubs, _) = stubCourses(from: banner)
+            if let stub = stubs.first(where: { $0.key == course }) {
+                catalog.courses[courseIndex].minCredits = stub.minCredits
+                catalog.courses[courseIndex].maxCredits = stub.maxCredits
+                catalog.courses[courseIndex].defaultCredits = stub.defaultCredits
+            }
+        }
         if !catalog.courses.contains(where: { $0.key == course }), !banner.isEmpty {
             let (stubs, _) = stubCourses(from: banner)
             catalog.courses.append(contentsOf: stubs)

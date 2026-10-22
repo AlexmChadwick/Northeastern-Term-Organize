@@ -91,7 +91,7 @@ struct MacAutofillCard: View {
         let count = suggestion.courses.count
         guard count > 0 else { return suggestion.detail }
         var parts = [suggestion.detail, ScheduleAutofillSupport.courseCountLabel(count)]
-        let credits = suggestion.courses.compactMap { index?.course($0)?.maxCredits }
+        let credits = suggestion.courses.compactMap { index?.course($0)?.defaultChoiceCredits }
         let total = credits.reduce(0, +)
         if credits.count == count, total > 0 {
             parts.append(CreditFormatter.label(min: total, max: total))

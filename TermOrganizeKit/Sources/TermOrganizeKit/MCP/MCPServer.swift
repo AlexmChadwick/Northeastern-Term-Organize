@@ -246,6 +246,14 @@ func boolArg(_ arguments: [String: Any], _ key: String) -> Bool? {
     return nil
 }
 
+func doubleArg(_ arguments: [String: Any], _ key: String) -> Double? {
+    if arguments[key] is Bool { return nil }
+    if let number = arguments[key] as? Double { return number }
+    if let number = arguments[key] as? Int { return Double(number) }
+    if let number = arguments[key] as? NSNumber { return number.doubleValue }
+    return nil
+}
+
 /// Newline-delimited JSON-RPC. One message per line. No Content-Length header.
 enum MCPFraming {
     static let maxBytes = 8 * 1024 * 1024

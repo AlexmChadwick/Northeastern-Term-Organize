@@ -42,7 +42,15 @@ struct MacDegreePlanSemesterSection: View {
                     uncheckedReason: review.uncheckedReason(for: course),
                     offeringNote: review.offeringNote(for: course),
                     equivalenceNote: plan.degreeEquivalenceNote(for: course.key),
-                    requirementNote: requirementNote(course)
+                    requirementNote: requirementNote(course),
+                    caption: catalog.cpsCaption(for: course, in: term),
+                    creditSpan: catalog.creditSpan(for: course, in: term),
+                    onSetCredits: { credits in
+                        editor.perform("Change Credits") {
+                            DegreePlanEditing.setCredits(course.id, to: credits, in: &$0)
+                        }
+                        editor.userData.syncChosenCredits(fromDegreePlan: plan.id)
+                    }
                 )
                 .tag(course.id)
                 .draggable(MacDegreeCourseDrag(planID: plan.id, courseID: course.id, summary: Self.summary(of: course, catalog: catalog)))
@@ -155,6 +163,7 @@ struct MacDegreePlanCompletedSection: View {
     var plan: DegreePlan
     var review: DegreePlanReview
     var catalog: DegreePlanCatalogSnapshot
+    var editor: MacDegreePlanEditor
     @Binding var isExpanded: Bool
     /// Where the degree requirements count a completed course, when they're set up.
     var requirementNote: (DegreePlanCourse) -> String? = { _ in nil }
@@ -176,7 +185,15 @@ struct MacDegreePlanCompletedSection: View {
                         status: nil,
                         note: review.note(for: course),
                         equivalenceNote: plan.degreeEquivalenceNote(for: course.key),
-                        requirementNote: requirementNote(course)
+                        requirementNote: requirementNote(course),
+                        caption: catalog.cpsCaption(for: course, in: nil),
+                        creditSpan: catalog.creditSpan(for: course, in: nil),
+                        onSetCredits: { credits in
+                            editor.perform("Change Credits") {
+                                DegreePlanEditing.setCredits(course.id, to: credits, in: &$0)
+                            }
+                            editor.userData.syncChosenCredits(fromDegreePlan: plan.id)
+                        }
                     )
                     .tag(course.id)
                 }

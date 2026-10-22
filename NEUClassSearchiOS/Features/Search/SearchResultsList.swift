@@ -100,7 +100,8 @@ struct SearchResultsList: View, Equatable {
                             termCode: termCode,
                             course: result.course,
                             stats: stats(for: result),
-                            note: result.matchNote
+                            note: result.matchNote,
+                            caption: CPSNote.courseCaption(sections: index.sections(for: result.course.key))
                         )
                     }
                 } header: {

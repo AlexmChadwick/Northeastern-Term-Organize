@@ -336,7 +336,10 @@ struct PlanDetailView: View {
                     termName: termName,
                     conflictingKeys: conflictingKeys(for: entry, in: resolved),
                     onOpen: { sheet = .picker(entry.key, entry.id) },
-                    onToggleRequired: { toggleRequired(entry) }
+                    onToggleRequired: { toggleRequired(entry) },
+                    onSetCredits: { credits in
+                        userData.setScheduleCourseCredits(planID: plan.id, entryID: entry.id, credits: credits)
+                    }
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {

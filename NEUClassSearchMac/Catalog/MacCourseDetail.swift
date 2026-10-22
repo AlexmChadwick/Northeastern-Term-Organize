@@ -177,7 +177,12 @@ struct MacCourseDetail: View {
             if presentation == .pane {
                 paneActions
             }
-            MacCourseHeader(course: course, term: index.term, hasHonorsSections: index.stats(for: key).hasHonors)
+            MacCourseHeader(
+                course: course,
+                term: index.term,
+                hasHonorsSections: index.stats(for: key).hasHonors,
+                caption: CPSNote.courseCaption(sections: index.sections(for: key))
+            )
             MacCourseDescription(course: course, status: detailsStatus, onRetry: onRetryDetails)
             MacCourseRequirements(
                 key: key,
@@ -403,6 +408,7 @@ struct MacCourseHeader: View {
     var course: Course
     var term: Term
     var hasHonorsSections: Bool
+    var caption: String? = nil
 
     @Environment(UserDataStore.self) private var userData
     @Environment(\.macCourseCompact) private var compact
@@ -437,6 +443,9 @@ struct MacCourseHeader: View {
             if let affiliation {
                 Text(affiliation)
                     .foregroundStyle(.secondary)
+            }
+            if let caption {
+                CatalogCaption(text: caption)
             }
             chips
                 .padding(.top, 4)

@@ -274,7 +274,8 @@ final class CatalogStore {
               let course = index.course(key) else { return }
         let needsInstructors = index.sections(for: key).contains { $0.instructors == nil }
         let needsTopics = course.specialTopics && index.sections(for: key).contains { $0.description == nil }
-        guard !course.detailsLoaded || needsInstructors || needsTopics, !loadingDetails.contains(key) else { return }
+        let needsRestrictions = index.sections(for: key).contains { $0.restrictions == nil }
+        guard !course.detailsLoaded || needsInstructors || needsTopics || needsRestrictions, !loadingDetails.contains(key) else { return }
         loadingDetails.insert(key)
         defer { loadingDetails.remove(key) }
         do {

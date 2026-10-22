@@ -34,6 +34,7 @@ struct SearchTabView: View {
         var termCode: String?
         var updatedAt: Date?
         var liveRefreshes: [CourseKey: Date]
+        var indexVersion: Int
     }
 
     @State private var completed: Completed?
@@ -78,7 +79,8 @@ struct SearchTabView: View {
             query: searchModel.query,
             termCode: catalog.readyIndex?.term.code,
             updatedAt: catalog.sectionsUpdatedAt,
-            liveRefreshes: catalog.liveRefreshedAt
+            liveRefreshes: catalog.liveRefreshedAt,
+            indexVersion: catalog.indexVersion
         )
     }
 

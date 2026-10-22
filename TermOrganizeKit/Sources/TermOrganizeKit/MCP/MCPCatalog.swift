@@ -112,7 +112,7 @@ extension MCPTool {
         },
         MCPTool(
             name: "search_courses",
-            description: "Search one bundled term. Returns matching courses with title, credits, and attributes. no_prerequisites and no_corequisites keep a course only when its catalog details were loaded and that table is empty. A course whose requisites were not loaded is left out.",
+            description: "Search one bundled term. Returns matching courses with title, credits, credit_low, credit_high, and cps_only. no_prerequisites and no_corequisites keep a course only when its catalog details were loaded and that table is empty. A course whose requisites were not loaded is left out. level is all, undergrad, or grad. Undergrad is a course number below 5000. Grad is 5000 and above. It combines with the other filters.",
             properties: [
                 "term": stringSchema,
                 "query": stringSchema,
@@ -121,6 +121,7 @@ extension MCPTool {
                 "attribute": stringSchema,
                 "no_prerequisites": boolSchema,
                 "no_corequisites": boolSchema,
+                "level": stringSchema,
                 "limit": intSchema,
             ],
             required: ["term"],
@@ -134,6 +135,15 @@ extension MCPTool {
             var requisiteFilters = SearchFilters()
             requisiteFilters.noPrerequisites = boolArg(arguments, "no_prerequisites") == true
             requisiteFilters.noCorequisites = boolArg(arguments, "no_corequisites") == true
+            if let level = stringArg(arguments, "level")?.lowercased() {
+                switch level {
+                case "all": break
+                case "undergrad": requisiteFilters.degreeLevel = .undergrad
+                case "grad": requisiteFilters.degreeLevel = .grad
+                default:
+                    throw MCPToolError(code: "invalid_argument", message: "level must be all, undergrad, or grad.")
+                }
+            }
             let limit = min(100, max(1, intArg(arguments, "limit") ?? 25))
             let pool: [Course]
             if query.isEmpty {
@@ -153,7 +163,7 @@ extension MCPTool {
             }
             return [
                 "term": index.term.code,
-                "courses": matched.prefix(limit).map { courseJSON($0) },
+                "courses": matched.prefix(limit).map { courseJSON($0, sections: index.sections(for: $0.key)) },
             ]
         },
         MCPTool(
@@ -172,10 +182,11 @@ extension MCPTool {
             guard let course = index.course(key) else {
                 throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(index.term.code).")
             }
-            var payload = courseJSON(course)
+            let sections = index.sections(for: key)
+            var payload = courseJSON(course, sections: sections)
             payload["term"] = index.term.code
             payload["description"] = course.description
-            payload["sections"] = index.sections(for: key).map { sectionJSON($0) }
+            payload["sections"] = sections.map { sectionJSON($0) }
             return payload
         },
         MCPTool(
@@ -362,14 +373,21 @@ extension TermOrganizeMCPServer {
     }
 }
 
-func courseJSON(_ course: Course) -> [String: Any] {
-    [
+func courseJSON(_ course: Course, sections: [CourseSection] = []) -> [String: Any] {
+    var payload: [String: Any] = [
         "subject": course.subject,
         "number": course.number,
         "title": course.title,
         "credits": ["min": course.minCredits, "max": course.maxCredits],
+        "credit_low": course.minCredits,
+        "credit_high": course.maxCredits,
         "attributes": course.attributes,
+        "cps_only": jsonOptional(CPSNote.courseFlag(sections: sections)),
     ]
+    if let defaultCredits = course.defaultCredits {
+        payload["default_credits"] = defaultCredits
+    }
+    return payload
 }
 
 func sectionJSON(_ section: CourseSection) -> [String: Any] {
@@ -379,11 +397,23 @@ func sectionJSON(_ section: CourseSection) -> [String: Any] {
         "type": section.classType,
         "meetings": section.weeklyMeetings.map { meetingJSON($0) },
         "instructors": (section.instructors ?? []).map { instructorJSON($0) },
+        "cps_only": jsonOptional(CPSNote.isCPSOnly(section.restrictions)),
     ]
+    if let span = section.creditSpan {
+        payload["credit_low"] = span.low
+        payload["credit_high"] = span.high
+        if let hours = span.bannerDefault { payload["credit_hours"] = hours }
+    }
     if section.seatCapacity > 0 || section.seatsRemaining > 0 {
         payload["seats"] = ["remaining": section.seatsRemaining, "capacity": section.seatCapacity]
     }
     return payload
+}
+
+/// JSON null when the value is unknown.
+func jsonOptional(_ value: Bool?) -> Any {
+    if let value { return value }
+    return NSNull()
 }
 
 func meetingJSON(_ meeting: Meeting) -> [String: Any] {

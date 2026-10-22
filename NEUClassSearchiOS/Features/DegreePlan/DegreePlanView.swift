@@ -436,7 +436,13 @@ struct DegreePlanView: View {
             },
             retryChecks: { retryCourseInfo() },
             addEquivalence: { key in sheet = .equivalence(DegreeEquivalenceRequest(planID: planID, course: key)) },
-            replaceCourse: { course, key in replace(course, with: key) }
+            replaceCourse: { course, key in replace(course, with: key) },
+            setCredits: { courseID, credits in
+                performUndoable("Changed credits", systemImage: "plusminus") {
+                    DegreePlanEditing.setCredits(courseID, to: credits, in: &$0)
+                }
+                userData.syncChosenCredits(fromDegreePlan: planID)
+            }
         )
     }
 
@@ -450,6 +456,7 @@ struct DegreePlanView: View {
     private func performUndoable(_ message: String, systemImage: String = "trash.fill", _ change: (inout DegreePlan) -> Void) {
         guard let before = userData.degreePlan(id: planID) else { return }
         withAnimation { userData.updateDegreePlan(id: planID, change) }
+        userData.syncChosenCredits(fromDegreePlan: planID)
         haptic.fire(.impact)
         toast = DegreePlanToast(text: message, systemImage: systemImage, actionTitle: "Undo") {
             withAnimation {
@@ -459,6 +466,7 @@ struct DegreePlanView: View {
                     plan.studentName = before.studentName
                     plan.studentID = before.studentID
                 }
+                userData.syncChosenCredits(fromDegreePlan: planID)
             }
         }
     }
@@ -520,7 +528,10 @@ struct DegreePlanView: View {
     private func replace(_ course: DegreePlanCourse, with key: CourseKey) {
         let snapshot = catalog.degreePlanSnapshot()
         let title = snapshot.course(key)?.title.nilIfBlank ?? info.info(for: key)?.title.nilIfBlank ?? key.description
-        let credits = snapshot.course(key)?.maxCredits ?? info.info(for: key)?.maxCredits ?? course.credits
+        let credits = snapshot.course(key)?.defaultChoiceCredits ?? info.info(for: key).flatMap { info in
+            guard let low = info.minCredits ?? info.maxCredits else { return nil as Double? }
+            return CreditSpan(low: low, high: info.maxCredits ?? low, bannerDefault: nil).defaultChoice()
+        } ?? course.credits
         let replacement = DegreePlanCourse(key: key, title: DegreePlanFormat.exportTitle(title), credits: credits)
         performUndoable("Replaced \(courseName(course)) with \(key)", systemImage: "arrow.triangle.2.circlepath") {
             DegreePlanEditing.replacePlannedCourse(course.id, with: replacement, in: &$0)

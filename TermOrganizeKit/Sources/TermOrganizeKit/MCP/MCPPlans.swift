@@ -28,9 +28,9 @@ extension MCPTool {
         ], required: ["plan_id", "name", "expected_revision"], readOnly: false) { arguments, server in
             try server.renamePlan(arguments)
         },
-        MCPTool(name: "add_course", description: "Add a catalog course to a term of a saved plan. The same subject and number can be added again, with or without a crn. A repeat that is not its own topic is listed under validation.duplicates. Each copy still counts.", properties: [
+        MCPTool(name: "add_course", description: "Add a catalog course to a term of a saved plan. The same subject and number can be added again, with or without a crn. A repeat that is not its own topic is listed under validation.duplicates. Each copy still counts. Optional credits sets the whole-credit value for a variable-credit course. Omit it and the row starts at Banner's default when that default is inside the range, otherwise the low end.", properties: [
             "plan_id": stringSchema, "term": stringSchema, "subject": stringSchema, "number": stringSchema,
-            "crn": stringSchema, "expected_revision": intSchema,
+            "crn": stringSchema, "credits": ["type": "number"], "expected_revision": intSchema,
         ], required: ["plan_id", "term", "subject", "number", "expected_revision"], readOnly: false) { arguments, server in
             try server.addCourse(arguments)
         },
@@ -51,6 +51,12 @@ extension MCPTool {
             "crn": stringSchema, "from_crn": stringSchema, "expected_revision": intSchema,
         ], required: ["plan_id", "term", "subject", "number", "crn", "expected_revision"], readOnly: false) { arguments, server in
             try server.setSection(arguments)
+        },
+        MCPTool(name: "set_credits", description: "Set the whole-credit value of one degree-plan row. The course must be variable credit. credits outside the range, or a fixed-credit course, is invalid_argument and nothing is written. crn follows remove_course: optional when that subject and number appears once, and required when it appears more than once.", properties: [
+            "plan_id": stringSchema, "term": stringSchema, "subject": stringSchema, "number": stringSchema,
+            "crn": stringSchema, "credits": ["type": "number"], "expected_revision": intSchema,
+        ], required: ["plan_id", "term", "subject", "number", "credits", "expected_revision"], readOnly: false) { arguments, server in
+            try server.setCredits(arguments)
         },
         MCPTool(name: "apply_reorganize", description: "Run reorganize_plan on a saved plan and write the result. Returns the moves and any unresolved courses.", properties: [
             "plan_id": stringSchema, "expected_revision": intSchema,
@@ -139,9 +145,11 @@ extension TermOrganizeMCPServer {
         let key = try courseKey(arguments)
         let crn = stringArg(arguments, "crn")
         try validateCourse(key, term: term, crn: crn)
+        let requested = try optionalCredits(arguments)
+        let credits = try creditsForNewRow(key, term: term, crn: crn, requested: requested)
         let expected = try expectedRevision(arguments)
         return try mutate(id: id, expected: expected) { plan in
-            let course = catalogCourse(key, crn: crn)
+            let course = catalogCourse(key, crn: crn, credits: credits)
             if let index = plan.terms.firstIndex(where: { bannerCode($0) == term }) {
                 plan.terms[index].include(course: course)
             } else {
@@ -223,6 +231,25 @@ extension TermOrganizeMCPServer {
                 throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(term) of this plan.")
             }
             try assignSection(crn, from: fromCRN, for: key, in: &plan.terms[index])
+        }
+    }
+
+    func setCredits(_ arguments: [String: Any]) throws -> [String: Any] {
+        let id = try planID(arguments)
+        let term = try termCode(arguments, key: "term")
+        let key = try courseKey(arguments)
+        let crn = stringArg(arguments, "crn")
+        guard let requested = doubleArg(arguments, "credits") else {
+            throw MCPToolError(code: "invalid_argument", message: "credits must be a number.")
+        }
+        let expected = try expectedRevision(arguments)
+        return try mutate(id: id, expected: expected) { plan in
+            guard let index = plan.terms.firstIndex(where: { bannerCode($0) == term && $0.courses.contains { $0.key == key } }) else {
+                throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in term \(term) of this plan.")
+            }
+            let row = try rowIndex(crn: crn, for: key, in: plan.terms[index])
+            let chosen = try variableCredits(requested, key: key, term: term, crn: plan.terms[index].courses[row].crn)
+            plan.terms[index].courses[row].credits = chosen
         }
     }
 
@@ -355,6 +382,11 @@ extension TermOrganizeMCPServer {
                 }
                 var row: [String: Any] = ["subject": key.subject, "number": key.number, "title": course.title, "credits": course.credits]
                 let sections = index?.sections(for: key) ?? []
+                let pinned = course.crn.flatMap { crn in sections.first { $0.crn == crn } }
+                if let span = ChosenCredits.span(course: index?.course(key), section: pinned) {
+                    row["credit_low"] = span.low
+                    row["credit_high"] = span.high
+                }
                 if sections.isEmpty {
                     notOffered.append(["term": code, "subject": key.subject, "number": key.number])
                 }
@@ -401,9 +433,88 @@ extension TermOrganizeMCPServer {
         ]
     }
 
-    private func catalogCourse(_ key: CourseKey, crn: String?) -> DegreePlanCourse {
+    private func catalogCourse(_ key: CourseKey, crn: String?, credits: Double? = nil) -> DegreePlanCourse {
         let listed = library.indexes.values.compactMap { $0.course(key) }.first
-        return DegreePlanCourse(key: key, title: listed?.title ?? key.description, credits: listed?.maxCredits ?? 0, crn: crn)
+        let chosen = credits ?? listed?.defaultChoiceCredits ?? 0
+        return DegreePlanCourse(key: key, title: listed?.title ?? key.description, credits: chosen, crn: crn)
+    }
+
+    /// A number when `credits` was sent. Nil when it was omitted.
+    /// A non-number is invalid_argument.
+    private func optionalCredits(_ arguments: [String: Any]) throws -> Double? {
+        guard arguments["credits"] != nil else { return nil }
+        guard let credits = doubleArg(arguments, "credits") else {
+            throw MCPToolError(code: "invalid_argument", message: "credits must be a number.")
+        }
+        return credits
+    }
+
+    /// Credits for a new row. Omitted credits use Banner's default when it sits
+    /// in the range, otherwise the low end. A sent value must be a whole number
+    /// inside the range. A fixed course accepts only its one value.
+    private func creditsForNewRow(_ key: CourseKey, term: String, crn: String?, requested: Double?) throws -> Double {
+        let span = creditSpan(key, term: term, crn: crn)
+        guard let span else { return requested ?? 0 }
+        guard let requested else { return span.defaultChoice() }
+        if !span.isVariable {
+            let only = span.defaultChoice()
+            guard requested == only else {
+                throw MCPToolError(code: "invalid_argument", message: "\(key.description) is worth \(CreditFormatter.number(only)) credits.")
+            }
+            return only
+        }
+        return try wholeCredits(requested, span: span, key: key)
+    }
+
+    /// The chosen value for a variable-credit row. A fixed course is refused.
+    private func variableCredits(_ value: Double, key: CourseKey, term: String, crn: String?) throws -> Double {
+        guard let span = creditSpan(key, term: term, crn: crn), span.isVariable else {
+            throw MCPToolError(code: "invalid_argument", message: "\(key.description) is a fixed-credit course.")
+        }
+        return try wholeCredits(value, span: span, key: key)
+    }
+
+    private func wholeCredits(_ value: Double, span: CreditSpan, key: CourseKey) throws -> Double {
+        guard let bounds = span.integerBounds else {
+            throw MCPToolError(code: "invalid_argument", message: "\(key.description) has no whole-credit value in its range.")
+        }
+        let whole = value.rounded()
+        guard whole == value, bounds.contains(Int(whole)) else {
+            throw MCPToolError(
+                code: "invalid_argument",
+                message: "\(key.description) takes a whole number of credits from \(bounds.lowerBound) to \(bounds.upperBound)."
+            )
+        }
+        return whole
+    }
+
+    /// The pinned section's range when it has one, otherwise the course range.
+    private func creditSpan(_ key: CourseKey, term: String, crn: String?) -> CreditSpan? {
+        let index = library.index(for: term)
+        let course = index?.course(key) ?? library.indexes.values.compactMap { $0.course(key) }.first
+        let section = crn.flatMap { index?.section(crn: $0) }
+        return ChosenCredits.span(course: course, section: section)
+    }
+
+    /// The row `crn` names. One row may omit it. More than one row requires it.
+    private func rowIndex(crn: String?, for key: CourseKey, in term: DegreePlanTerm) throws -> Int {
+        let matches = term.courses.indices.filter { term.courses[$0].key == key }
+        guard !matches.isEmpty else {
+            throw MCPToolError(code: "unknown_course", message: "\(key.description) is not in this term of the plan.")
+        }
+        if matches.count > 1 {
+            guard let crn else {
+                throw MCPToolError(code: "invalid_argument", message: "\(key.description) is in this term more than once. Pass crn to name the row.")
+            }
+            guard let index = matches.first(where: { term.courses[$0].crn == crn }) else {
+                throw MCPToolError(code: "unknown_crn", message: "CRN \(crn) is not a chosen section of \(key.description) in this term.")
+            }
+            return index
+        }
+        if let crn, term.courses[matches[0]].crn != crn {
+            throw MCPToolError(code: "unknown_crn", message: "CRN \(crn) is not a chosen section of \(key.description) in this term.")
+        }
+        return matches[0]
     }
 
     private func validateTerm(_ code: String) throws {

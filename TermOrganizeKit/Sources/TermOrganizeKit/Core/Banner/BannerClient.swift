@@ -247,6 +247,17 @@ final class BannerClient: Sendable {
         try await postForm("searchResults/getSectionCatalogDetails", term: term, crn: crn)
     }
 
+    func fetchRestrictionsHTML(term: String, crn: String) async throws -> String {
+        try await postForm("searchResults/getRestrictions", term: term, crn: crn)
+    }
+
+    /// Must and cannot lists for one section. An empty array means Banner returned
+    /// a fragment with no lists. Throws when the request fails, so the caller can
+    /// leave a cached value in place.
+    func fetchRestrictions(term: String, crn: String) async throws -> [SectionRestriction] {
+        RestrictionParser.parse(try await fetchRestrictionsHTML(term: term, crn: crn))
+    }
+
     /// Fetches description, requisites and catalog details for a course using one
     /// of its sections, merging them into `course`.
     func fetchCourseDetails(term: String, crn: String, course: Course, subjects: BannerParsers.SubjectLookup) async throws -> Course {

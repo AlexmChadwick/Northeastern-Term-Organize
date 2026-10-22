@@ -15,9 +15,10 @@ import Foundation
 /// Like a degree audit, each course counts toward one requirement. Approved substitutions
 /// apply first. Then courses are matched from the most specific requirements to the least:
 /// required courses, "complete N of the following" lists (including the concentration's),
-/// ranges such as "CS 2500 or higher", and finally general electives. Completed courses are
-/// preferred over planned ones, and a course several lists name is saved for the list that
-/// needs it most. A requirement still short then takes a course from another one when a
+/// ranges such as "CS 2500 or higher", and finally general electives. A line with no credit
+/// never fills one of those requirements (a withdrawn attempt, or a placeholder repeat); a
+/// co-op with no credit still counts for the co-op note. Completed courses are preferred over
+/// planned ones, and a course several lists name is saved for the list that needs it most. A requirement still short then takes a course from another one when a
 /// different course of the plan can count there instead (HIST 2220 for "Computing and Social
 /// Issues", so CY 4170 can be a Khoury elective), or when a required course with alternatives
 /// can use another one. Finally, if a requirement is still short although the plan has courses
@@ -377,9 +378,12 @@ private struct AuditEngine {
             guard let key = course.key else { return }
             var use = CourseUse(key: key, title: course.title, credits: course.credits, semester: semester, order: order, crn: course.crn)
             let earlier = instances[key, default: []].compactMap { pool[$0] }
-            // A line with no credit is a placeholder, not a second course. Every other copy
-            // counts on its own, including two seminars with the same title or the same CRN.
-            // duplicateKeys still warns about those. It does not drop them from the audit.
+            // A line with no credit is a withdrawn attempt, or a co-op. It is not a second
+            // copy of the course. It stays in the pool so a co-op note can see it. Matching
+            // never counts it (`standIn`), so it cannot sit in a required-course slot ahead
+            // of a later attempt that has credit. That attempt is reserved for the course it
+            // is required as, before any elective or substitution range. Every copy that has
+            // credit counts on its own.
             if use.credits <= 0, let repeated = earlier.first {
                 let better = repeated.isCompleted == use.isCompleted ? use.credits > repeated.credits : use.isCompleted
                 if better {
@@ -755,6 +759,9 @@ private struct AuditEngine {
         var courses: [NUpathMatching.Course] = []
         var unknown: [CourseUse] = []
         for use in uses {
+            // A withdrawn attempt has no credit and does not satisfy a NUpath attribute.
+            // A co-op has no credit either; it is counted below, not as a course.
+            guard use.credits > 0 || Self.isCoop(use) else { continue }
             guard let paths = nupaths(of: use) else { unknown.append(use); continue }
             if !paths.isEmpty { courses.append(NUpathMatching.Course(id: use.id, paths: paths, isCompleted: use.isCompleted)) }
         }
@@ -1100,9 +1107,11 @@ private struct AuditEngine {
     // MARK: Equivalent courses
 
     /// The course in the plan, not yet counted, that can stand in for `required`: the course
-    /// itself, else an equivalent (completed ones first, then in plan order).
+    /// itself, else an equivalent (completed ones first, then in plan order). A line with no
+    /// credit never stands in. Required courses are filled before elective and substitution
+    /// ranges, so the credit-bearing attempt is reserved for the course it is required as.
     private func standIn(for required: CourseKey, excluding claimed: Set<UseID> = []) -> UseID? {
-        let free = { (id: UseID) in available.contains(id) && !claimed.contains(id) }
+        let free = { (id: UseID) in available.contains(id) && !claimed.contains(id) && (pool[id]?.credits ?? 0) > 0 }
         if let own = instances[required, default: []].filter(free).min(by: comesFirst) { return own }
         guard !equivalences.isEmpty else { return nil }
         return equivalences.equivalents(of: required)
@@ -1433,7 +1442,7 @@ extension AuditEngine {
             }
             let key = named[position]
             let candidates = (instances[key, default: []] + equivalences.equivalents(of: key).sorted().flatMap { instances[$0, default: []] })
-                .filter { freeSet.contains($0) && !claimed.contains($0) }
+                .filter { freeSet.contains($0) && !claimed.contains($0) && (pool[$0]?.credits ?? 0) > 0 }
             for id in candidates {
                 current.append((key, id))
                 claimed.insert(id)

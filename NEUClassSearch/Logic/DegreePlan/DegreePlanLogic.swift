@@ -154,17 +154,27 @@ enum DegreePlanAnalysis {
         return texts.filter { seen.insert($0).inserted }
     }
 
-    /// Courses planned (or completed) more than once. Another section of the same number
-    /// isn't a duplicate when `DegreeCourseRepeats` says it counts on its own: a different
-    /// CRN, or (when neither row has a CRN) a topics course taken again on another topic.
+    /// Courses listed more than once. A planned row is a duplicate of an earlier planned
+    /// row, or of a completed row, when `DegreeCourseRepeats.countsSeparately` says they
+    /// are the same course. Completed rows are compared with each other the same way, so
+    /// two finished listings that do not count separately are flagged even when the number
+    /// never appears in a future term. Another section of the same number is not a
+    /// duplicate when it counts on its own: a different CRN, or (when neither row has a
+    /// CRN) a topics course taken again.
     static func duplicateKeys(in plan: DegreePlan) -> Set<CourseKey> {
         let planned = plan.terms.flatMap(\.courses)
+        let completed = plan.completed
         var duplicates = Set<CourseKey>()
         for (index, course) in planned.enumerated() {
             guard let key = course.key else { continue }
             let repeatsPlanned = planned[..<index].contains { $0.key == key && !DegreeCourseRepeats.countsSeparately($0, course) }
-            let repeatsCompleted = plan.completed.contains { $0.key == key && !DegreeCourseRepeats.countsSeparately($0, course) }
+            let repeatsCompleted = completed.contains { $0.key == key && !DegreeCourseRepeats.countsSeparately($0, course) }
             if repeatsPlanned || repeatsCompleted { duplicates.insert(key) }
+        }
+        for (index, course) in completed.enumerated() {
+            guard let key = course.key else { continue }
+            let repeatsEarlier = completed[..<index].contains { $0.key == key && !DegreeCourseRepeats.countsSeparately($0, course) }
+            if repeatsEarlier { duplicates.insert(key) }
         }
         return duplicates
     }

@@ -176,13 +176,23 @@ struct AddToPlanSheet: View {
         case available
         case alreadyAdded
         case canSwitchSection(current: CourseSection?)
+        /// The schedule already has this number, pinned to other CRNs. This section is another topic.
+        case canAddAgain
     }
 
     private func rowState(for plan: SchedulePlan) -> RowState {
         guard plan.contains(request.key) else { return .available }
         guard let crn = request.crn else { return .alreadyAdded }
+        if plan.courses.contains(where: { $0.pinnedCRN == crn }) || plan.selectedCRNs.contains(crn) {
+            return .alreadyAdded
+        }
+        let rows = plan.entries(for: request.key)
+        let pins = rows.compactMap(\.pinnedCRN)
+        let loneChoice = rows.count == 1 && plan.selectedCRNs.contains { courseCRNs.contains($0) }
+        if rows.allSatisfy({ $0.pinnedCRN != nil }) || loneChoice || pins.count == rows.count {
+            return .canAddAgain
+        }
         let current = plan.selectedCRNs.first { courseCRNs.contains($0) }
-        if current == crn { return .alreadyAdded }
         return .canSwitchSection(current: current.flatMap { index?.section(crn: $0) })
     }
 
@@ -243,6 +253,8 @@ struct AddToPlanSheet: View {
         case .canSwitchSection(let current):
             if let current { return "Already added · switch from \(ScheduleFormat.sectionTitle(current))" }
             return "Already added · choose this section"
+        case .canAddAgain:
+            return "Already added · add this section too"
         }
     }
 
@@ -412,10 +424,7 @@ struct AddToPlanSheet: View {
 
         let crns = courseCRNs
         for id in ids {
-            userData.addCourse(request.key, toPlan: id)
-            if let crn = request.crn {
-                userData.updatePlan(id: id) { PlanEditing.setSection(crn, courseCRNs: crns, in: &$0) }
-            }
+            userData.includeCourse(request.key, crn: request.crn, courseCRNs: crns, toPlan: id)
         }
         haptic.fire(.success)
         let order = Dictionary(userData.plans(in: request.termCode).enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })

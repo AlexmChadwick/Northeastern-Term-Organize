@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		7A0000000000000000000060 /* NEUClassSearchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7A0000000000000000000031 /* NEUClassSearchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7A0000000000000000000065 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0000000000000000000023 /* main.swift */; };
+		7A0000000000000000000066 /* TermOrganizeKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7A00000000000000000000A1 /* TermOrganizeKit */; };
+		7A0000000000000000000067 /* term-organize-mcp in Embed Helper */ = {isa = PBXBuildFile; fileRef = 7A0000000000000000000034 /* term-organize-mcp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,6 +28,13 @@
 			remoteGlobalIDString = 7A0000000000000000000040;
 			remoteInfo = NEUClassSearch;
 		};
+		7A0000000000000000000069 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7A0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7A0000000000000000000044;
+			remoteInfo = "term-organize-mcp";
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -39,6 +49,17 @@
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7A0000000000000000000091 /* Embed Helper */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				7A0000000000000000000067 /* term-organize-mcp in Embed Helper */,
+			);
+			name = "Embed Helper";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -49,6 +70,8 @@
 		7A0000000000000000000031 /* NEUClassSearchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NEUClassSearchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		7A0000000000000000000032 /* NEUClassSearchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NEUClassSearchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7A0000000000000000000033 /* Term Organize.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Term Organize.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A0000000000000000000034 /* term-organize-mcp */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "term-organize-mcp"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A0000000000000000000023 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -72,6 +95,24 @@
 				Info.plist,
 			);
 			target = 7A0000000000000000000040 /* NEUClassSearch */;
+		};
+		7A0000000000000000000075 /* Exceptions for "TermOrganizeKit" folder in "NEUClassSearch" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				MCP/MCPServer.swift,
+				MCP/MCPCatalog.swift,
+				MCP/MCPPlans.swift,
+			);
+			target = 7A0000000000000000000040 /* NEUClassSearch */;
+		};
+		7A0000000000000000000076 /* Exceptions for "TermOrganizeKit" folder in "NEUClassSearchMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				MCP/MCPServer.swift,
+				MCP/MCPCatalog.swift,
+				MCP/MCPPlans.swift,
+			);
+			target = 7A0000000000000000000043 /* NEUClassSearchMac */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -97,6 +138,15 @@
 		7A0000000000000000000013 /* Tools */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Tools;
+			sourceTree = "<group>";
+		};
+		7A0000000000000000000017 /* TermOrganizeKit */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7A0000000000000000000075 /* Exceptions for "TermOrganizeKit" folder in "NEUClassSearch" target */,
+				7A0000000000000000000076 /* Exceptions for "TermOrganizeKit" folder in "NEUClassSearchMac" target */,
+			);
+			path = TermOrganizeKit/Sources/TermOrganizeKit;
 			sourceTree = "<group>";
 		};
 		7A0000000000000000000014 /* NEUClassSearchTests */ = {
@@ -151,6 +201,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7A0000000000000000000094 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A0000000000000000000066 /* TermOrganizeKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -164,6 +222,8 @@
 				7A0000000000000000000011 /* NEUClassSearchWidgets */,
 				7A0000000000000000000014 /* NEUClassSearchTests */,
 				7A0000000000000000000013 /* Tools */,
+				7A0000000000000000000017 /* TermOrganizeKit */,
+				7A0000000000000000000018 /* TermOrganizeMCP */,
 				7A0000000000000000000020 /* README.md */,
 				7A0000000000000000000022 /* NOTICE.md */,
 				7A0000000000000000000021 /* LICENSE */,
@@ -178,8 +238,17 @@
 				7A0000000000000000000031 /* NEUClassSearchWidgets.appex */,
 				7A0000000000000000000032 /* NEUClassSearchTests.xctest */,
 				7A0000000000000000000033 /* Term Organize.app */,
+				7A0000000000000000000034 /* term-organize-mcp */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		7A0000000000000000000018 /* TermOrganizeMCP */ = {
+			isa = PBXGroup;
+			children = (
+				7A0000000000000000000023 /* main.swift */,
+			);
+			path = TermOrganizeKit/Sources/TermOrganizeMCP;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -203,6 +272,7 @@
 				7A0000000000000000000010 /* NEUClassSearch */,
 				7A0000000000000000000012 /* Shared */,
 				7A0000000000000000000016 /* NEUClassSearchiOS */,
+				7A0000000000000000000017 /* TermOrganizeKit */,
 			);
 			name = NEUClassSearch;
 			packageProductDependencies = (
@@ -264,15 +334,18 @@
 				7A000000000000000000005A /* Sources */,
 				7A000000000000000000005B /* Frameworks */,
 				7A000000000000000000005C /* Resources */,
+				7A0000000000000000000091 /* Embed Helper */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7A0000000000000000000068 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				7A0000000000000000000010 /* NEUClassSearch */,
 				7A0000000000000000000012 /* Shared */,
 				7A0000000000000000000015 /* NEUClassSearchMac */,
+				7A0000000000000000000017 /* TermOrganizeKit */,
 			);
 			name = NEUClassSearchMac;
 			packageProductDependencies = (
@@ -280,6 +353,25 @@
 			productName = NEUClassSearchMac;
 			productReference = 7A0000000000000000000033 /* Term Organize.app */;
 			productType = "com.apple.product-type.application";
+		};
+		7A0000000000000000000044 /* term-organize-mcp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7A0000000000000000000098 /* Build configuration list for PBXNativeTarget "term-organize-mcp" */;
+			buildPhases = (
+				7A0000000000000000000093 /* Sources */,
+				7A0000000000000000000094 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "term-organize-mcp";
+			packageProductDependencies = (
+				7A00000000000000000000A1 /* TermOrganizeKit */,
+			);
+			productName = "term-organize-mcp";
+			productReference = 7A0000000000000000000034 /* term-organize-mcp */;
+			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
 
@@ -304,6 +396,9 @@
 					7A0000000000000000000043 = {
 						CreatedOnToolsVersion = 27.0;
 					};
+					7A0000000000000000000044 = {
+						CreatedOnToolsVersion = 27.0;
+					};
 				};
 			};
 			buildConfigurationList = 7A0000000000000000000080 /* Build configuration list for PBXProject "NEUClassSearch" */;
@@ -317,6 +412,9 @@
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7A0000000000000000000003 /* Products */;
+			packageReferences = (
+				7A00000000000000000000A0 /* XCLocalSwiftPackageReference "TermOrganizeKit" */,
+			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -324,6 +422,7 @@
 				7A0000000000000000000041 /* NEUClassSearchWidgets */,
 				7A0000000000000000000042 /* NEUClassSearchTests */,
 				7A0000000000000000000043 /* NEUClassSearchMac */,
+				7A0000000000000000000044 /* term-organize-mcp */,
 			);
 		};
 /* End PBXProject section */
@@ -388,6 +487,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7A0000000000000000000093 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A0000000000000000000065 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -400,6 +507,11 @@
 			isa = PBXTargetDependency;
 			target = 7A0000000000000000000040 /* NEUClassSearch */;
 			targetProxy = 7A0000000000000000000063 /* PBXContainerItemProxy */;
+		};
+		7A0000000000000000000068 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7A0000000000000000000044 /* term-organize-mcp */;
+			targetProxy = 7A0000000000000000000069 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -727,6 +839,56 @@
 			};
 			name = Release;
 		};
+		7A0000000000000000000096 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TermOrganizeKit/term-organize-mcp.entitlements;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 832J6JB4V7;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alexchadwick.termorganize.mcp;
+				PRODUCT_MODULE_NAME = TermOrganizeMCP;
+				PRODUCT_NAME = "term-organize-mcp";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7A0000000000000000000097 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TermOrganizeKit/term-organize-mcp.entitlements;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 832J6JB4V7;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.alexchadwick.termorganize.mcp;
+				PRODUCT_MODULE_NAME = TermOrganizeMCP;
+				PRODUCT_NAME = "term-organize-mcp";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -775,7 +937,31 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		7A0000000000000000000098 /* Build configuration list for PBXNativeTarget "term-organize-mcp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A0000000000000000000096 /* Debug */,
+				7A0000000000000000000097 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		7A00000000000000000000A0 /* XCLocalSwiftPackageReference "TermOrganizeKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = TermOrganizeKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7A00000000000000000000A1 /* TermOrganizeKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7A00000000000000000000A0 /* XCLocalSwiftPackageReference "TermOrganizeKit" */;
+			productName = TermOrganizeKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 7A0000000000000000000001 /* Project object */;
 }

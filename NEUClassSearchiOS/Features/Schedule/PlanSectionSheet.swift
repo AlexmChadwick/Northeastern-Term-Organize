@@ -15,7 +15,7 @@ import UIKit
 struct PlanSectionSheet: View {
     var planID: UUID
     var crn: String
-    var onChangeSection: (CourseKey) -> Void
+    var onChangeSection: (CourseKey, String) -> Void
     var onViewCourse: (CourseKey) -> Void
 
     @Environment(CatalogStore.self) private var catalog
@@ -166,7 +166,7 @@ struct PlanSectionSheet: View {
 
             Section {
                 Button {
-                    onChangeSection(entry.key)
+                    onChangeSection(entry.key, entry.id)
                 } label: {
                     Label("Change Section", systemImage: "arrow.left.arrow.right")
                 }
@@ -189,7 +189,7 @@ struct PlanSectionSheet: View {
                 }
                 Button(role: .destructive) {
                     userData.updatePlan(id: planID) { plan in
-                        PlanEditing.setSection(nil, courseCRNs: entry.courseCRNs.union([section.crn]), in: &plan)
+                        PlanEditing.setSection(nil, courseCRNs: entry.courseCRNs.union([section.crn]), entryID: entry.id, in: &plan)
                     }
                     haptic.fire(.impact)
                     dismiss()

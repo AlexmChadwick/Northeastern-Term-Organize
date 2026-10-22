@@ -147,8 +147,7 @@ struct DegreePlanAddCourseSheet: View {
     }
 
     private func courseRow(_ course: Course, plan: DegreePlan, term: DegreePlanTerm) -> some View {
-        let isAdded = term.courses.contains { $0.key == course.key }
-        let entry = DegreePlanCourse(key: course.key, title: course.title, credits: course.maxCredits)
+        let entry = DegreePlanCourse(key: course.key, title: course.title, credits: course.defaultChoiceCredits)
         return Button {
             add(course)
         } label: {
@@ -156,28 +155,25 @@ struct DegreePlanAddCourseSheet: View {
                 DegreePlanCourseRow(
                     course: entry,
                     title: course.title,
-                    status: isAdded ? nil : missingPrerequisite(of: course, in: plan, term: term),
-                    note: isAdded ? nil : planNote(for: course, in: plan, excluding: term)
+                    status: missingPrerequisite(of: course, in: plan, term: term),
+                    note: planNote(for: course, in: plan, term: term)
                 )
-                addState(isAdded: isAdded)
+                addState()
             }
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityValue(isAdded ? "Added" : "")
-        .accessibilityHint(isAdded ? "Already in \(term.name)" : "Adds to \(term.name)")
+        .accessibilityHint(accessibilityHint(for: course, in: term))
     }
 
-    /// "Add" before a course is in the semester, "Added" after.
-    private func addState(isAdded: Bool) -> some View {
-        Label(isAdded ? "Added" : "Add", systemImage: isAdded ? "checkmark" : "plus")
+    /// "Add" stays available after the course is already in the semester, so a second copy can be added.
+    private func addState() -> some View {
+        Label("Add", systemImage: "plus")
             .font(.caption.weight(.semibold))
-            .foregroundStyle(isAdded ? Color.green : Color.accentColor)
+            .foregroundStyle(Color.accentColor)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background((isAdded ? Color.green : Color.accentColor).opacity(0.14), in: .capsule)
-            .contentTransition(.symbolEffect(.replace))
-            .animation(.snappy, value: isAdded)
+            .background(Color.accentColor.opacity(0.14), in: .capsule)
             .accessibilityHidden(true)
     }
 
@@ -193,23 +189,32 @@ struct DegreePlanAddCourseSheet: View {
         return status.isMissing ? status : nil
     }
 
-    /// Where else the plan already has a course, so it isn't added twice by accident.
-    private func planNote(for course: Course, in plan: DegreePlan, excluding term: DegreePlanTerm) -> String? {
-        if plan.completedKeys.contains(course.key) { return "Already in your completed courses" }
+    /// A non-blocking note when the plan already has this number. Adding still keeps another copy.
+    private func planNote(for course: Course, in plan: DegreePlan, term: DegreePlanTerm) -> String? {
+        if term.courses.contains(where: { $0.key == course.key }) {
+            return "Already in \(term.name). Adding it again keeps both copies."
+        }
+        if plan.completedKeys.contains(course.key) { return "Already in your completed courses. Each copy still counts." }
         if let other = plan.terms.first(where: { $0.id != term.id && $0.courses.contains { $0.key == course.key } }) {
-            return "Already planned in \(other.name)"
+            return "Already planned in \(other.name). Each copy still counts."
         }
         return nil
+    }
+
+    private func accessibilityHint(for course: Course, in term: DegreePlanTerm) -> String {
+        term.courses.contains(where: { $0.key == course.key })
+            ? "Adds another \(course.key) to \(term.name)"
+            : "Adds to \(term.name)"
     }
 
     // MARK: Actions
 
     private func add(_ course: Course) {
-        guard let term, !term.courses.contains(where: { $0.key == course.key }) else { return }
+        guard term != nil else { return }
         let entry = DegreePlanCourse(
             key: course.key,
             title: DegreePlanFormat.exportTitle(course.title),
-            credits: course.maxCredits
+            credits: course.defaultChoiceCredits
         )
         userData.updateDegreePlan(id: planID) { DegreePlanEditing.add(entry, toTerm: termID, in: &$0) }
         haptic.fire(.success)

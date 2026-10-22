@@ -344,10 +344,13 @@ struct ScheduleGeneratorView: View {
             var key: CourseKey
             var isRequired: Bool
             var excluded: [String]
+            var pinnedCRN: String?
         }
 
         var termCode: String
         var courses: [CourseSignature]
+        /// Chosen sections. A change has to regenerate, or a pin would keep the old combinations.
+        var pinnedCRNs: [String]
         var filters: ScheduleFilters
         var preferences: SchedulePreferences
         var sort: ScheduleSortOption
@@ -360,7 +363,8 @@ struct ScheduleGeneratorView: View {
         guard let plan, index != nil else { return nil }
         return GenerationKey(
             termCode: plan.termCode,
-            courses: plan.courses.map { .init(key: $0.key, isRequired: $0.isRequired, excluded: $0.excludedCRNs.sorted()) },
+            courses: plan.courses.map { .init(key: $0.key, isRequired: $0.isRequired, excluded: $0.excludedCRNs.sorted(), pinnedCRN: $0.pinnedCRN) },
+            pinnedCRNs: plan.selectedCRNs.sorted(),
             filters: plan.filters,
             preferences: plan.preferences ?? SchedulePreferences(),
             sort: sort,
@@ -466,7 +470,8 @@ struct ScheduleGeneratorView: View {
     }
 
     private func use(_ schedule: GeneratedSchedule) {
-        userData.updatePlan(id: planID) { $0.selectedCRNs = schedule.crns }
+        guard let index else { return }
+        userData.updatePlan(id: planID) { PlanEditing.adoptGeneratedSchedule(schedule.crns, into: &$0, index: index) }
         haptic.fire(.success)
         dismiss()
     }

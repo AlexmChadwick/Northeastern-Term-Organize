@@ -46,6 +46,9 @@ struct MacDegreePlanCourseRow: View {
     /// Where the degree requirements count the course, e.g. "Counts toward Khoury Elective
     /// Courses" (only when the plan's requirements are set up).
     var requirementNote: String?
+    var caption: String? = nil
+    var creditSpan: CreditSpan? = nil
+    var onSetCredits: ((Double) -> Void)? = nil
 
     @Environment(\.macPlanRowLayout) private var layout
 
@@ -59,6 +62,19 @@ struct MacDegreePlanCourseRow: View {
     static let prerequisiteWidth: CGFloat = 150
 
     private var usesColumns: Bool { layout == .columns }
+    private var showsStepper: Bool { creditSpan?.isVariable == true && onSetCredits != nil }
+
+    @ViewBuilder
+    private var creditControl: some View {
+        if showsStepper, let creditSpan, let onSetCredits {
+            CreditChoiceControl(span: creditSpan, credits: course.credits, onChange: onSetCredits)
+        } else {
+            Text(DegreePlanText.credits(course.credits))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -70,6 +86,9 @@ struct MacDegreePlanCourseRow: View {
                         .foregroundStyle(course.key == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                         .lineLimit(2)
                 }
+                if let caption {
+                    CatalogCaption(text: caption)
+                }
                 flags
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -77,11 +96,8 @@ struct MacDegreePlanCourseRow: View {
                 countsCell
                     .frame(width: Self.countsWidth, alignment: .leading)
             }
-            Text(DegreePlanText.credits(course.credits))
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .frame(width: Self.creditsWidth, alignment: .trailing)
+            creditControl
+                .frame(width: showsStepper ? 220 : Self.creditsWidth, alignment: .trailing)
             if usesColumns {
                 prerequisiteCell
                     .frame(width: Self.prerequisiteWidth, alignment: .leading)

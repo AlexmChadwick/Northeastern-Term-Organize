@@ -112,6 +112,8 @@ struct DegreePlanSemesterSection: View {
 
     @ViewBuilder
     private func courseRow(_ course: DegreePlanCourse) -> some View {
+        let span = catalog.creditSpan(for: course, in: term)
+        let variable = span?.isVariable == true
         let row = DegreePlanCourseRow(
             course: course,
             title: catalog.title(for: course),
@@ -121,14 +123,23 @@ struct DegreePlanSemesterSection: View {
             uncheckedReason: review.uncheckedReason(for: course),
             offeringNote: review.offeringNote(for: course),
             equivalenceNote: plan.degreeEquivalenceNote(for: course.key),
-            requirementNote: requirementNote(course)
+            requirementNote: requirementNote(course),
+            caption: catalog.cpsCaption(for: course, in: term),
+            showsCredits: !variable
         )
         let courseTermCode = course.key.flatMap { catalog.routeTermCode(for: $0, in: term) }
-        Group {
-            if let key = course.key, let courseTermCode {
-                NavigationLink(value: AppRoute.course(termCode: courseTermCode, key: key)) { row }
-            } else {
-                row
+        VStack(alignment: .leading, spacing: 4) {
+            Group {
+                if let key = course.key, let courseTermCode {
+                    NavigationLink(value: AppRoute.course(termCode: courseTermCode, key: key)) { row }
+                } else {
+                    row
+                }
+            }
+            if variable, let span {
+                CreditChoiceControl(span: span, credits: course.credits) { credits in
+                    actions.setCredits(course.id, credits)
+                }
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {

@@ -1,0 +1,111 @@
+{
+  "plan": {
+    "terms": [
+      {
+        "term": "202710",
+        "name": "Fall 2026",
+        "courses": [
+          { "subject": "CS", "number": "4805" },
+          { "subject": "CS", "number": "2535" },
+          { "subject": "CS", "number": "2700" },
+          { "subject": "CS", "number": "4130" },
+          { "subject": "CS", "number": "2701" }
+        ]
+      },
+      {
+        "term": "202730",
+        "name": "Spring 2027",
+        "courses": []
+      }
+    ]
+  },
+  "expected": {
+    "moves": [
+      {
+        "subject": "CS",
+        "number": "4805",
+        "from_term": "202710",
+        "to_term": "202730",
+        "reason": "Not offered in 202710. 202730 offers it, and prerequisites that are in this plan stay in an earlier term."
+      },
+      {
+        "subject": "CS",
+        "number": "2535",
+        "from_term": "202710",
+        "to_term": "202730",
+        "reason": "Not offered in 202710. 202730 offers it, and prerequisites that are in this plan stay in an earlier term."
+      },
+      {
+        "subject": "CS",
+        "number": "2700",
+        "from_term": "202710",
+        "to_term": "202730",
+        "reason": "Not offered in 202710. 202730 offers it, and prerequisites that are in this plan stay in an earlier term."
+      },
+      {
+        "subject": "CS",
+        "number": "4130",
+        "from_term": "202710",
+        "to_term": "202730",
+        "reason": "Not offered in 202710. 202730 offers it, and prerequisites that are in this plan stay in an earlier term."
+      },
+      {
+        "subject": "CS",
+        "number": "2701",
+        "from_term": "202710",
+        "to_term": "202730",
+        "reason": "Not offered in 202710. 202730 offers it, and prerequisites that are in this plan stay in an earlier term."
+      }
+    ],
+    "unresolved": []
+  },
+  "reasoning": [
+    {
+      "subject": "CS",
+      "number": "4805",
+      "offered_in_202710": false,
+      "offered_in_202730": true,
+      "sections_in_202730": 1,
+      "prerequisite": "CS 3800",
+      "prerequisite_in_plan": false
+    },
+    {
+      "subject": "CS",
+      "number": "2535",
+      "offered_in_202710": false,
+      "offered_in_202730": true,
+      "sections_in_202730": 2,
+      "prerequisite": "CS 2100 or CS 201M",
+      "prerequisite_in_plan": false
+    },
+    {
+      "subject": "CS",
+      "number": "2700",
+      "offered_in_202710": false,
+      "offered_in_202730": true,
+      "sections_in_202730": 3,
+      "prerequisite": "(CS 1800 or MATH 1365 or MATH 1465 or MATH 209M) and (CS 2100 or CS 201M)",
+      "prerequisite_in_plan": false,
+      "corequisite_ignored": "CS 2701"
+    },
+    {
+      "subject": "CS",
+      "number": "4130",
+      "offered_in_202710": false,
+      "offered_in_202730": true,
+      "sections_in_202730": 1,
+      "prerequisite": "CS 3100 or CS 310M or CS 3500 or DS 3500",
+      "prerequisite_in_plan": false
+    },
+    {
+      "subject": "CS",
+      "number": "2701",
+      "offered_in_202710": false,
+      "offered_in_202730": true,
+      "sections_in_202730": 8,
+      "prerequisite": null,
+      "prerequisite_in_plan": false,
+      "corequisite_ignored": "CS 2700"
+    }
+  ]
+}

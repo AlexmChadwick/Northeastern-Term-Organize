@@ -32,9 +32,13 @@ struct MacSidebar: View {
             Section(catalog.selectedTerm.map { "Schedules · \($0.shortName)" } ?? "Schedules") {
                 Label("All Schedules", systemImage: "calendar").tag(MacSidebarItem.schedules)
                 ForEach(schedules) { plan in
-                    Label(plan.name, systemImage: plan.isPrimary ? "star.fill" : "calendar")
-                        .tag(MacSidebarItem.schedule(plan.id))
-                        .contextMenu { MacSchedulePlanMenu(plan: plan, manager: planManager) }
+                    Label {
+                        ScheduleNameLabel(name: plan.name, showsIcon: false)
+                    } icon: {
+                        Image(systemName: plan.isPrimary ? "star.fill" : "calendar")
+                    }
+                    .tag(MacSidebarItem.schedule(plan.id))
+                    .contextMenu { MacSchedulePlanMenu(plan: plan, manager: planManager) }
                 }
             }
 
@@ -67,5 +71,38 @@ struct MacSidebar: View {
     private var schedules: [SchedulePlan] {
         guard let code = catalog.selectedTerm?.code else { return [] }
         return userData.plans(in: code)
+    }
+}
+
+/// The stored name can end in " (edited in app)". The badge is the visible
+/// mark, so that suffix is not also drawn in the row. The stored name is unchanged.
+struct ScheduleNameLabel: View {
+    var name: String
+    var showsIcon: Bool = true
+    var systemImage: String? = nil
+
+    private var isAppEdit: Bool {
+        name.contains(UserDataPlanMerge.editedInAppSuffix)
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if showsIcon, let systemImage {
+                Image(systemName: systemImage)
+            }
+            Text(isAppEdit ? UserDataPlanMerge.sidebarLabel(forStoredName: name) : name)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if isAppEdit {
+                Text("App edit")
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: Capsule())
+                    .layoutPriority(1)
+                    .accessibilityLabel("Edited in app")
+            }
+        }
     }
 }

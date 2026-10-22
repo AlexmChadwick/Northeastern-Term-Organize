@@ -170,18 +170,16 @@ struct MacProfessorsView: View {
 
     private func professorsTable(_ rows: [ProfessorDirectoryEntry], index: CatalogIndex, tier: ColumnTier) -> some View {
         Table(
-            of: ProfessorDirectoryEntry.self,
+            rows,
             selection: $selection,
             sortOrder: $sortOrder,
             columnCustomization: MacCatalogTableColumns.binding($customization, dropping: tier == .wide ? [] : ["email"])
         ) {
             columns(index: index)
-        } rows: {
-            ForEach(rows) { entry in
-                TableRow(entry).draggable(entry.displayName)
-            }
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .macFocusesOnClick()
+        .macScrollsTableSelectionIntoView(when: selection)
         .contextMenu(forSelectionType: String.self) { names in
             if !names.isEmpty {
                 menu(for: names, index: index)

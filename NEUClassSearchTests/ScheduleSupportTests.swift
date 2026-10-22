@@ -41,6 +41,15 @@ private enum Support {
         )
     }
 
+    static func banner(_ crn: String, _ subject: String, _ number: String, title: String) -> BannerSection {
+        let json = """
+        {"courseReferenceNumber":"\(crn)","courseNumber":"\(number)","subject":"\(subject)",\
+        "sequenceNumber":"01","campusDescription":"Boston","scheduleTypeDescription":"Lecture",\
+        "courseTitle":"\(title)","creditHours":4,"maximumEnrollment":40,"enrollment":10,"seatsAvailable":30}
+        """
+        return try! JSONDecoder().decode(BannerSection.self, from: Data(json.utf8))
+    }
+
     static func index(courses: [Course], sections: [CourseSection]) -> CatalogIndex {
         CatalogIndex.build(TermCatalog(
             term: Term(code: "202710", bannerDescription: "Fall 2026 Semester"),
@@ -279,6 +288,37 @@ struct ScheduleSupportTests {
         #expect(ScheduleDroppedCourse.parse(["hello"]).isEmpty)
     }
 
+    /// Each pinned topic is its own prerequisite row. A later course that needs the number
+    /// is satisfied by either one, and the two topics are not flagged as a repeat.
+    @Test func twoTopicsEachKeepAPrerequisiteStatus() {
+        let topics = CourseKey(subject: "CS", number: "4973")
+        let laterKey = CourseKey(subject: "CS", number: "3500")
+        var seminar = Support.course("CS", "4973")
+        seminar.specialTopics = true
+        seminar.title = "Seminar"
+        var later = Support.course("CS", "3500")
+        later.prereqs = .course(topics)
+        later.title = "Object-Oriented Design"
+        let index = Support.index(courses: [seminar, later], sections: [])
+        let first = DegreePlanCourse(key: topics, title: "Seminar", credits: 4, crn: "11111")
+        let second = DegreePlanCourse(key: topics, title: "Seminar", credits: 4, crn: "22222")
+        let follow = DegreePlanCourse(key: laterKey, title: "Object-Oriented Design", credits: 4)
+        var plan = DegreePlan(name: "Topics")
+        plan.terms = [
+            DegreePlanTerm(season: .fall, year: 2026, courses: [first, second]),
+            DegreePlanTerm(season: .spring, year: 2027, courses: [follow]),
+        ]
+        let review = DegreePlanReview(
+            plan: plan,
+            catalog: DegreePlanCatalogSnapshot(indexes: [index], terms: [index.term])
+        )
+        #expect(review.duplicateCount == 0)
+        #expect(review.status(for: first) == .met)
+        #expect(review.status(for: second) == .met)
+        #expect(review.status(for: follow) == .met)
+        #expect(DegreePlanAnalysis.duplicateKeys(in: plan).isEmpty)
+    }
+
     @Test func clockConvertsMinutesAndPickerDates() {
         for minutes in [0, 9 * 60 + 15, 23 * 60 + 59] {
             #expect(ScheduleClock.minutes(from: ScheduleClock.date(forMinutes: minutes)) == minutes)
@@ -358,5 +398,134 @@ struct SchedulePlanActionsTests {
         spring.termCode = "202730"
         #expect(ScheduleReorderSuggestions.semester(for: spring, degreePlan: degreePlan, terms: terms, index: nil) == nil)
         #expect(ScheduleReorderSuggestions.semester(for: plan, degreePlan: nil, terms: terms, index: nil) == nil)
+    }
+
+    /// CS 4973 is offered as two topics. Pinning one CRN, adopting a generated schedule,
+    /// refreshing the catalog, and detaching the course for a reorganize must not switch topics.
+    /// `setSection` is the edit that may change the pin.
+    @Test func specialTopicsPinStaysOnItsCRN() {
+        let topicA = Support.section("11111", "CS", "4973", days: [1], start: 9, end: 10)
+        let topicB = Support.section("22222", "CS", "4973", days: [2], start: 9, end: 10)
+        let math = Support.section("33333", "MATH", "2331", days: [3], start: 9, end: 10)
+        let courses = [
+            Course(subject: "CS", number: "4973", title: "Special Topics", description: "", minCredits: 4, maxCredits: 4,
+                   attributes: [], prereqs: nil, coreqs: nil, postreqs: [], specialTopics: true, college: nil, department: nil, detailsLoaded: true),
+            Support.course("MATH", "2331"),
+        ]
+        let index = Support.index(courses: courses, sections: [topicA, topicB, math])
+        var plan = Support.plan(["CS 4973", "MATH 2331"], selected: ["11111"])
+
+        PlanEditing.adoptGeneratedSchedule(["22222", "33333"], into: &plan, index: index)
+        #expect(plan.selectedCRNs == ["11111", "33333"])
+
+        let resolved = ResolvedPlan(plan: plan, index: index)
+        #expect(resolved.entry(for: CourseKey(subject: "CS", number: "4973"))?.chosen?.crn == "11111")
+
+        var catalog = TermCatalog(
+            term: Term(code: "202710", bannerDescription: "Fall 2026 Semester"),
+            courses: courses, sections: [topicA, topicB, math], subjects: [], attributes: [], campuses: []
+        )
+        CatalogBuilder.applyCourseRefresh(&catalog, course: CourseKey(subject: "CS", number: "4973"), banner: [
+            Support.banner("22222", "CS", "4973", title: "Topic B"),
+            Support.banner("11111", "CS", "4973", title: "Topic A"),
+        ])
+        let refreshed = CatalogIndex.build(catalog)
+        let afterRefresh = ResolvedPlan(plan: plan, index: refreshed)
+        #expect(afterRefresh.entry(for: CourseKey(subject: "CS", number: "4973"))?.chosen?.crn == "11111")
+        #expect(!afterRefresh.selectedSections.map(\.crn).contains("22222"))
+
+        CatalogBuilder.applyCourseRefresh(&catalog, course: CourseKey(subject: "CS", number: "4973"), banner: [
+            Support.banner("22222", "CS", "4973", title: "Topic B"),
+        ])
+        let dropped = ResolvedPlan(plan: plan, index: CatalogIndex.build(catalog))
+        #expect(dropped.unlistedCRNs == ["11111"])
+        #expect(dropped.entry(for: CourseKey(subject: "CS", number: "4973"))?.chosen == nil)
+
+        let detached = PlanEditing.selectedCRNs(plan.selectedCRNs, for: CourseKey(subject: "CS", number: "4973"), index: index)
+        #expect(detached == ["11111"])
+        var remaining = plan.selectedCRNs
+        remaining.removeAll { detached.contains($0) }
+        #expect(remaining == ["33333"])
+
+        PlanEditing.setSection("22222", courseCRNs: Set(["11111", "22222"]), in: &plan)
+        #expect(plan.selectedCRNs.contains("22222"))
+        #expect(!plan.selectedCRNs.contains("11111"))
+    }
+
+    /// A second row of a number is allowed only when every row already has a different CRN.
+    @Test func duplicateCourseNumbersNeedDistinctCRNs() {
+        let key = CourseKey(subject: "CS", number: "4973")
+        let sections: Set<String> = ["11111", "22222", "33333"]
+        var plan = SchedulePlan(name: "Topics", termCode: "202710")
+
+        #expect(plan.include(key: key, crn: nil) == .added)
+        #expect(plan.include(key: key, crn: nil) == .alreadyPresent)
+        #expect(plan.courses.count == 1)
+
+        #expect(plan.include(key: key, crn: "22222", courseCRNs: sections) == .pinnedExisting)
+        #expect(plan.courses.count == 1)
+        #expect(plan.courses[0].pinnedCRN == "22222")
+        #expect(plan.include(key: key, crn: "22222", courseCRNs: sections) == .alreadyPresent)
+        #expect(plan.courses.count == 1)
+
+        #expect(plan.include(key: key, crn: "11111", courseCRNs: sections) == .added)
+        #expect(plan.courses.map(\.pinnedCRN) == ["22222", "11111"])
+
+        let second = plan.courses[1].id
+        PlanEditing.setSection("33333", courseCRNs: sections, entryID: second, in: &plan)
+        #expect(plan.courses[0].pinnedCRN == "22222")
+        #expect(plan.courses[1].pinnedCRN == "33333")
+        #expect(plan.selectedCRNs.contains("22222"))
+        #expect(plan.selectedCRNs.contains("33333"))
+        #expect(!plan.selectedCRNs.contains("11111"))
+
+        PlanEditing.setSection("22222", courseCRNs: sections, entryID: second, in: &plan)
+        #expect(plan.courses[1].pinnedCRN == "33333")
+        PlanEditing.setSection(nil, courseCRNs: sections, entryID: second, in: &plan)
+        #expect(plan.courses[1].pinnedCRN == "33333")
+    }
+
+    /// Removing one topic leaves the other topic and its CRN.
+    @Test func removingOneTopicLeavesItsSibling() {
+        let (userData, url) = store()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let key = CourseKey(subject: "CS", number: "4973")
+        let plan = userData.createPlan(name: "Topics", termCode: "202710")
+        userData.includeCourse(key, crn: "11111", toPlan: plan.id)
+        userData.includeCourse(key, crn: "22222", toPlan: plan.id)
+        let current = userData.plan(id: plan.id)!
+        let resolved = ResolvedPlan(plan: current, index: nil)
+        let entry = resolved.entries.first { $0.planCourse.pinnedCRN == "11111" }!
+        _ = SchedulePlanActions.removeCourse(entry, from: current, index: nil, userData: userData)
+        let after = userData.plan(id: plan.id)!
+        #expect(after.courses.map(\.pinnedCRN) == ["22222"])
+        #expect(after.selectedCRNs == ["22222"])
+    }
+
+    /// A degree-plan draft keeps both pinned topics, and keeps both rows when neither has a CRN.
+    @Test func degreePlanDraftKeepsDistinctTopics() {
+        let key = CourseKey(subject: "CS", number: "4973")
+        var schedule = SchedulePlan(name: "Plan A", termCode: "202730")
+        schedule.isPrimary = true
+        schedule.courses = [
+            PlanCourse(key: key, colorIndex: 0, pinnedCRN: "11111"),
+            PlanCourse(key: key, colorIndex: 1, pinnedCRN: "22222"),
+        ]
+        let draft = DegreePlanAutofill.newDegreePlanDraft(
+            name: "Draft", basedOn: nil, schedulePlans: [schedule], catalogIndex: { _ in nil }
+        )
+        let copied = draft.terms.flatMap(\.courses)
+        #expect(copied.compactMap(\.crn).sorted() == ["11111", "22222"])
+        #expect(copied.allSatisfy { $0.key == key })
+
+        schedule.courses = [
+            PlanCourse(key: key, colorIndex: 0),
+            PlanCourse(key: key, colorIndex: 1),
+        ]
+        let merged = DegreePlanAutofill.newDegreePlanDraft(
+            name: "Draft", basedOn: nil, schedulePlans: [schedule], catalogIndex: { _ in nil }
+        )
+        #expect(merged.terms.flatMap(\.courses).count == 2)
+        #expect(merged.terms.flatMap(\.courses).allSatisfy { $0.key == key && $0.crn == nil })
     }
 }

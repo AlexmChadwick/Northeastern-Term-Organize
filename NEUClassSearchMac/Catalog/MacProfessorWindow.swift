@@ -329,18 +329,16 @@ struct MacProfessorContent: View {
     private func sectionsTable(_ sections: [CourseSection], tier: ColumnTier) -> some View {
         let dropped = Self.optionalColumnIDs.filter { ColumnTier.first(showing: $0) > tier }
         return Table(
-            of: CourseSection.self,
+            sections,
             selection: $selection,
             sortOrder: $sortOrder,
             columnCustomization: MacCatalogTableColumns.binding($customization, dropping: dropped)
         ) {
             columns
-        } rows: {
-            ForEach(sections) { section in
-                TableRow(section).draggable("\(section.courseKey.description) \(section.crn)")
-            }
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .macFocusesOnClick()
+        .macScrollsTableSelectionIntoView(when: selection)
         .contextMenu(forSelectionType: String.self) { crns in
             if !crns.isEmpty {
                 MacCourseSectionMenu(

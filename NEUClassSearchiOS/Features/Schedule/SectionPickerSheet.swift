@@ -15,6 +15,8 @@ import SwiftUI
 struct SectionPickerSheet: View {
     var planID: UUID
     var courseKey: CourseKey
+    /// The plan row to edit. Nil edits the first row of `courseKey`.
+    var entryID: String? = nil
 
     @Environment(CatalogStore.self) private var catalog
     @Environment(UserDataStore.self) private var userData
@@ -55,7 +57,7 @@ struct SectionPickerSheet: View {
                             ProgressView()
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
-                    } else if let entry = resolved.entry(for: courseKey) {
+                    } else if let entry = planEntry(in: resolved) {
                         picker(plan: plan, resolved: resolved, entry: entry)
                     } else {
                         ContentUnavailableView("Course not in this schedule", systemImage: "questionmark.folder")
@@ -87,7 +89,7 @@ struct SectionPickerSheet: View {
     private func picker(plan: SchedulePlan, resolved: ResolvedPlan, entry: ResolvedPlan.Entry) -> some View {
         let current = entry.chosen
         let highlighted = highlightedCRN.flatMap { crn in entry.allSections.first { $0.crn == crn } }
-        let others = resolved.entries.filter { $0.key != courseKey }.flatMap(\.selected)
+        let others = resolved.entries.filter { $0.id != entry.id }.flatMap(\.selected)
         let visible = visibleSections(entry: entry, others: others)
         // Campus tags only help when the course is taught on more than one campus.
         let multiCampus = Set(entry.allSections.map(\.campus)).count > 1
@@ -135,7 +137,10 @@ struct SectionPickerSheet: View {
             }
         }
         .safeAreaBar(edge: .bottom) {
-            bottomBar(plan: plan, entry: entry, current: current, highlighted: highlighted)
+            bottomBar(
+                plan: plan, entry: entry, current: current, highlighted: highlighted,
+                canClear: !resolved.entries.contains { $0.key == entry.key && $0.id != entry.id }
+            )
         }
         .onAppear {
             if highlightedCRN == nil { highlightedCRN = current?.crn }
@@ -277,7 +282,7 @@ struct SectionPickerSheet: View {
 
     // MARK: Bottom bar
 
-    private func bottomBar(plan: SchedulePlan, entry: ResolvedPlan.Entry, current: CourseSection?, highlighted: CourseSection?) -> some View {
+    private func bottomBar(plan: SchedulePlan, entry: ResolvedPlan.Entry, current: CourseSection?, highlighted: CourseSection?, canClear: Bool) -> some View {
         GlassEffectContainer(spacing: 10) {
             VStack(spacing: 10) {
                 if let highlighted {
@@ -316,6 +321,7 @@ struct SectionPickerSheet: View {
                         }
                         .buttonStyle(.glass)
                         .controlSize(.large)
+                        .disabled(!canClear)
                         .accessibilityLabel("Remove section from schedule")
                     }
                 }
@@ -373,7 +379,7 @@ struct SectionPickerSheet: View {
 
     private func choose(_ crn: String, entry: ResolvedPlan.Entry) {
         userData.updatePlan(id: planID) { plan in
-            PlanEditing.setSection(crn, courseCRNs: entry.courseCRNs, in: &plan)
+            PlanEditing.setSection(crn, courseCRNs: entry.courseCRNs, entryID: entry.id, in: &plan)
         }
         haptic.fire(.success)
         dismiss()
@@ -381,7 +387,7 @@ struct SectionPickerSheet: View {
 
     private func clear(entry: ResolvedPlan.Entry) {
         userData.updatePlan(id: planID) { plan in
-            PlanEditing.setSection(nil, courseCRNs: entry.courseCRNs, in: &plan)
+            PlanEditing.setSection(nil, courseCRNs: entry.courseCRNs, entryID: entry.id, in: &plan)
         }
         haptic.fire(.impact)
         dismiss()
@@ -389,9 +395,18 @@ struct SectionPickerSheet: View {
 
     private func setExcluded(_ excluded: Bool, crn: String) {
         userData.updatePlan(id: planID) { plan in
-            PlanEditing.setExcluded(excluded, crn: crn, for: courseKey, in: &plan)
+            if let entryID {
+                PlanEditing.setExcluded(excluded, crn: crn, entryID: entryID, in: &plan)
+            } else {
+                PlanEditing.setExcluded(excluded, crn: crn, for: courseKey, in: &plan)
+            }
         }
         haptic.fire(.selection)
+    }
+
+    private func planEntry(in resolved: ResolvedPlan) -> ResolvedPlan.Entry? {
+        if let entryID, let entry = resolved.entry(id: entryID) { return entry }
+        return resolved.entry(for: courseKey)
     }
 
     /// Instructors are fetched lazily; this makes them appear in the list (and says so when it can't).

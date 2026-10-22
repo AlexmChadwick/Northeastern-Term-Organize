@@ -80,6 +80,31 @@ struct DegreeNUpathTests {
 
     // MARK: NUpath
 
+    /// Writing-intensive needs two courses. Two sections of CS 4973 with different CRNs
+    /// are two courses; the same title with no CRN is one.
+    @Test func twoSectionsOfOneNumberCountAsTwoNUpathCourses() throws {
+        let requirements = try Self.requirements()
+        var separate = DegreePlan(name: "Seminars")
+        separate.completed = [
+            DegreePlanCourse(key: CourseKey(string: "CS 4973"), title: "Seminar", credits: 4, crn: "11111"),
+            DegreePlanCourse(key: CourseKey(string: "CS 4973"), title: "Seminar", credits: 4, crn: "22222"),
+        ]
+        let both = DegreeAudit.run(plan: separate, requirements: requirements, attributes: Self.attributes(["CS 4973": [.wi]]))
+        let writing = try #require(Self.item(Self.nupath(both), .wi))
+        #expect(writing.status == .complete)
+        #expect(writing.courses.sorted() == ["CS 4973", "CS 4973 (2)"])
+
+        var plain = DegreePlan(name: "Seminars")
+        plain.completed = [
+            DegreePlanCourse(key: CourseKey(string: "CS 4973"), title: "Seminar", credits: 4),
+            DegreePlanCourse(key: CourseKey(string: "CS 4973"), title: "Seminar", credits: 4),
+        ]
+        let twice = DegreeAudit.run(plan: plain, requirements: requirements, attributes: Self.attributes(["CS 4973": [.wi]]))
+        let bothPlain = try #require(Self.item(Self.nupath(twice), .wi))
+        #expect(bothPlain.courses.sorted() == ["CS 4973", "CS 4973 (2)"])
+        #expect(bothPlain.status == .complete)
+    }
+
     @Test func everyNUpathRequirementIsChecked() throws {
         let audit = DegreeAudit.run(plan: Self.plan(), requirements: try Self.requirements(), attributes: Self.attributes())
         let check = try #require(Self.nupath(audit))
@@ -238,11 +263,11 @@ struct DegreeNUpathTests {
         let check = try #require(audit.noteChecks.first { if case .universitywide = $0.kind { true } else { false } })
         #expect(check.items.map(\.id) == ["total-hours", "gpa", "residency"])
         #expect(check.items[0].status == .partial)
-        #expect(check.items[0].detail == "44 of 128 semester hours · 12 planned")
+        #expect(check.items[0].detail == "32 of 128 semester hours · 12 planned")
         #expect(check.items[1].status == nil && check.items[1].detail == "Not checked: plans don’t include grades")
         #expect(check.items[2].status == nil)
         #expect(check.status == .partial && check.counts)
-        #expect(check.detail == "44 of 128 semester hours · 12 planned · GPA and residency not checked")
+        #expect(check.detail == "32 of 128 semester hours · 12 planned · GPA and residency not checked")
 
         // Without the minimums, nothing to check.
         let unread = DegreeAudit.run(plan: Self.plan(), requirements: try Self.requirements(), attributes: Self.attributes())
@@ -253,7 +278,7 @@ struct DegreeNUpathTests {
         let audit = DegreeAudit.run(plan: Self.plan(), requirements: try Self.requirements())
         let check = try #require(audit.noteChecks.first { if case .totalHours = $0.kind { true } else { false } })
         #expect(check.status == .partial)
-        #expect(check.detail == "44 of 134 semester hours · 12 planned")
+        #expect(check.detail == "32 of 134 semester hours · 12 planned")
     }
 
     @Test func saysWhySomeSentencesArentChecked() {
@@ -262,6 +287,88 @@ struct DegreeNUpathTests {
         #expect(DegreeAudit.uncheckedReason(for: "Pick one of the following concentrations and complete four courses in that concentration.")
                 == "Checked through the concentration you choose")
         #expect(DegreeAudit.uncheckedReason(for: "Courses may not be taken pass/fail.") == nil)
+    }
+
+    /// Alex's report: 105 earned and 30 planned. The header already said "105 of 134 credits
+    /// done · 30 planned". The universitywide line said "135 of 128 semester hours · 30 planned",
+    /// which is 105 + 30 in the first number and the 30 again. Every hours line uses
+    /// `DegreeAudit.hoursStatus`: the first number is completed credits only.
+    @Test func hoursLinesKeepCompletedSeparateFromPlanned() throws {
+        #expect(DegreeAudit.hoursStatus(completed: 105, planned: 30, required: 128)
+                == (.planned, "105 of 128 semester hours · 30 planned"))
+        #expect(DegreeAudit.hoursStatus(completed: 105, planned: 30, required: 134)
+                == (.planned, "105 of 134 semester hours · 30 planned"))
+        #expect(DegreeAudit.hoursStatus(completed: 60, planned: 22, required: 72)
+                == (.planned, "60 of 72 semester hours · 22 planned"))
+        #expect(DegreeAudit.hoursStatus(completed: 128, planned: 0, required: 128)
+                == (.complete, "128 of 128 semester hours"))
+        #expect(DegreeAudit.hoursStatus(completed: 140, planned: 10, required: 128)
+                == (.complete, "140 of 128 semester hours · 10 planned"))
+        #expect(DegreeAudit.hoursStatus(completed: 90, planned: 20, required: 128)
+                == (.partial, "90 of 128 semester hours · 20 planned"))
+        #expect(DegreeAudit.hoursStatus(completed: 0, planned: 0, required: 128)
+                == (.missing, "0 of 128 semester hours"))
+        #expect(DegreeAudit.hoursStatus(completed: 0, planned: 128, required: 128)
+                == (.planned, "0 of 128 semester hours · 128 planned"))
+
+        let page = """
+        <div id="programrequirementstextcontainer" class="tab_content">
+        <h2>Universitywide Requirements</h2>
+        <p>All undergraduate students are required to complete the Universitywide Requirements.</p>
+        <h2>Major Requirements</h2>
+        <table class="sc_courselist"><tbody>
+        <tr class="even firstrow"><td class="codecol"><a class="bubblelink code">CS&#160;3000</a></td><td>Algorithms</td><td class="hourscol">4</td></tr>
+        <tr class="odd"><td colspan="2"><span class="courselistcomment">Complete 8 semester hours of CS classes. Choose courses within the following ranges:</span></td><td class="hourscol">8</td></tr>
+        <tr class="even lastrow"><td colspan="2"><div style="margin-left:20px;" class="blockindent"><span class="courselistcomment commentindent"><a class="bubblelink code">CS&#160;2500</a> or higher</span></div></td><td class="hourscol"></td></tr>
+        </tbody></table>
+        <h2>Writing Requirement</h2>
+        <table class="sc_courselist"><tbody>
+        <tr class="even firstrow lastrow"><td class="codecol"><a class="bubblelink code">ENGW&#160;1111</a></td><td>First-Year Writing</td><td class="hourscol">4</td></tr>
+        </tbody></table>
+        <h2>Required General Electives</h2>
+        <table class="sc_courselist"><tbody>
+        <tr class="even lastrow firstrow"><td colspan="2"><span class="courselistcomment">Complete 4 semester hours of general electives.</span></td><td class="hourscol">4</td></tr>
+        </tbody></table>
+        <h2>Credit Requirement</h2>
+        <p>Complete 72 semester hours in the major.</p>
+        <h2>Program Requirement</h2>
+        <p>134 total semester hours required</p>
+        </div>
+        """
+        var requirements = try #require(ProgramCatalogParser.requirements(fromHTML: page, year: CatalogYear(startYear: 2024), program: Self.program))
+        requirements.universitywide = UniversitywideRequirements(totalHours: 128, gpa: 2, residencyHours: 64, fetchedAt: .now)
+        var plan = DegreePlan(name: "BS CS")
+        plan.completed = [
+            Self.course("CS 3000", 40),
+            Self.course("CS 2500", 20),
+            Self.course("ENGW 1111", 4),
+            Self.course("PHIL 1102", 41),
+        ]
+        var spring = DegreePlanTerm(season: .spring, year: 2027)
+        spring.courses = [Self.course("CS 3500", 22), Self.course("MKTG 2201", 8)]
+        plan.terms = [spring]
+
+        let audit = DegreeAudit.run(plan: plan, requirements: requirements)
+        #expect(audit.completedHours == 105)
+        #expect(audit.plannedHours == 30)
+        #expect(audit.requiredHours == 134)
+        #expect(DegreeRequirementText.creditsLine(audit) == "105 of 134 credits done · 30 planned")
+
+        let university = try #require(audit.noteChecks.first { if case .universitywide = $0.kind { true } else { false } })
+        #expect(university.status == .planned)
+        #expect(university.items[0].status == .planned)
+        #expect(university.items[0].detail == "105 of 128 semester hours · 30 planned")
+        #expect(university.detail == "105 of 128 semester hours · 30 planned · GPA and residency not checked")
+
+        let total = try #require(audit.noteChecks.first { if case .totalHours = $0.kind { true } else { false } })
+        #expect(total.status == .planned)
+        #expect(total.detail == "105 of 134 semester hours · 30 planned")
+
+        let major = try #require(audit.noteChecks.first { if case .majorHours = $0.kind { true } else { false } })
+        // CS 3000 (40) and CS 2500 (20) earned, CS 3500 (22) planned. Writing and the general
+        // electives are not hours in the major. 60 + 22 is not written as 82 and then 22 again.
+        #expect(major.status == .planned)
+        #expect(major.detail == "60 of 72 semester hours · 22 planned")
     }
 }
 

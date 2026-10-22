@@ -360,6 +360,7 @@ struct MacDegreePlanContent: View {
                     plan: plan,
                     review: review,
                     catalog: snapshot,
+                    editor: editor,
                     isExpanded: completedBinding(plan),
                     requirementNote: { requirements.requirementNote(for: $0, semester: nil) },
                     onDrop: { items in dropOnCompleted(items) }
@@ -767,9 +768,7 @@ struct MacDegreePlanContent: View {
         guard let plan = userData.degreePlan(id: planID) else { return false }
         let mine = items.filter { $0.planID == planID }
         let moves = mine.compactMap(\.courseID)
-        // A course the plan already has isn't added again.
-        let planned = Set(plan.degreePlanCourseKeys)
-        let additions = mine.compactMap(\.addition).filter { !planned.contains($0.key) }
+        let additions = mine.compactMap(\.addition)
         guard !moves.isEmpty || !additions.isEmpty else { return false }
 
         let name: String
@@ -793,7 +792,7 @@ struct MacDegreePlanContent: View {
                 if let courseID = item.courseID {
                     DegreePlanEditing.move(courseID, toTerm: term.id, at: index, in: &plan)
                     index += 1
-                } else if let addition = item.addition, !planned.contains(addition.key) {
+                } else if let addition = item.addition {
                     let course = DegreePlanCourse(key: addition.key, title: addition.title, credits: addition.credits)
                     DegreePlanEditing.add(course, toTerm: term.id, in: &plan)
                     DegreePlanEditing.move(course.id, toTerm: term.id, at: index, in: &plan)
@@ -831,7 +830,10 @@ struct MacDegreePlanContent: View {
     private func replace(_ course: DegreePlanCourse, with key: CourseKey) {
         let snapshot = catalog.degreePlanSnapshot()
         let title = snapshot.course(key)?.title.nilIfBlank ?? info.info(for: key)?.title.nilIfBlank ?? key.description
-        let credits = snapshot.course(key)?.maxCredits ?? info.info(for: key)?.maxCredits ?? course.credits
+        let credits = snapshot.course(key)?.defaultChoiceCredits ?? info.info(for: key).flatMap { info in
+            guard let low = info.minCredits ?? info.maxCredits else { return nil as Double? }
+            return CreditSpan(low: low, high: info.maxCredits ?? low, bannerDefault: nil).defaultChoice()
+        } ?? course.credits
         let replacement = DegreePlanCourse(key: key, title: DegreePlanFormat.exportTitle(title), credits: credits)
         editor.perform("Replace \(courseName(course)) with \(key)") {
             DegreePlanEditing.replacePlannedCourse(course.id, with: replacement, in: &$0)

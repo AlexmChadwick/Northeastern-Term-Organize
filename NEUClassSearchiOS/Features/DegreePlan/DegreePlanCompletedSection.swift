@@ -51,20 +51,31 @@ struct DegreePlanCompletedSection: View {
 
     @ViewBuilder
     private func courseRow(_ course: DegreePlanCourse) -> some View {
+        let span = catalog.creditSpan(for: course, in: nil)
+        let variable = span?.isVariable == true
         let row = DegreePlanCourseRow(
             course: course,
             title: catalog.title(for: course),
             status: nil,
             note: review.note(for: course),
             equivalenceNote: plan.degreeEquivalenceNote(for: course.key),
-            requirementNote: requirementNote(course)
+            requirementNote: requirementNote(course),
+            caption: catalog.cpsCaption(for: course, in: nil),
+            showsCredits: !variable
         )
         let courseTermCode = course.key.flatMap { catalog.routeTermCode(for: $0) }
-        Group {
-            if let key = course.key, let courseTermCode {
-                NavigationLink(value: AppRoute.course(termCode: courseTermCode, key: key)) { row }
-            } else {
-                row
+        VStack(alignment: .leading, spacing: 4) {
+            Group {
+                if let key = course.key, let courseTermCode {
+                    NavigationLink(value: AppRoute.course(termCode: courseTermCode, key: key)) { row }
+                } else {
+                    row
+                }
+            }
+            if variable, let span {
+                CreditChoiceControl(span: span, credits: course.credits) { credits in
+                    actions.setCredits(course.id, credits)
+                }
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {

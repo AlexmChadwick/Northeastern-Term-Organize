@@ -15,6 +15,8 @@ import SwiftUI
 struct MacSectionPickerSheet: View {
     var planID: UUID
     var courseKey: CourseKey
+    /// The plan row to edit. Nil edits the first row of `courseKey`.
+    var entryID: String? = nil
     /// The window's undo manager, so a change of section can be undone with ⌘Z.
     var undoManager: UndoManager?
 
@@ -73,7 +75,7 @@ struct MacSectionPickerSheet: View {
                     } else {
                         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                } else if let entry = resolved.entry(for: courseKey) {
+                } else if let entry = planEntry(in: resolved) {
                     picker(plan: plan, resolved: resolved, entry: entry)
                 } else {
                     ContentUnavailableView("Course not in this schedule", systemImage: "questionmark.folder")
@@ -94,7 +96,7 @@ struct MacSectionPickerSheet: View {
     private func picker(plan: SchedulePlan, resolved: ResolvedPlan, entry: ResolvedPlan.Entry) -> some View {
         let current = entry.chosen
         let highlighted = highlightedCRN.flatMap { crn in entry.allSections.first { $0.crn == crn } }
-        let others = resolved.entries.filter { $0.key != courseKey }.flatMap(\.selected)
+        let others = resolved.entries.filter { $0.id != entry.id }.flatMap(\.selected)
         let rows = visibleRows(entry: entry, others: others)
         let multiCampus = Set(entry.allSections.map(\.campus)).count > 1
 
@@ -117,7 +119,10 @@ struct MacSectionPickerSheet: View {
                 }
             }
             Divider()
-            bottomBar(entry: entry, current: current, highlighted: highlighted)
+            bottomBar(
+                entry: entry, current: current, highlighted: highlighted,
+                canClear: !resolved.entries.contains { $0.key == entry.key && $0.id != entry.id }
+            )
         }
         .onAppear { if highlightedCRN == nil { highlightedCRN = current?.crn } }
     }
@@ -349,7 +354,7 @@ struct MacSectionPickerSheet: View {
 
     // MARK: Bottom bar
 
-    private func bottomBar(entry: ResolvedPlan.Entry, current: CourseSection?, highlighted: CourseSection?) -> some View {
+    private func bottomBar(entry: ResolvedPlan.Entry, current: CourseSection?, highlighted: CourseSection?, canClear: Bool) -> some View {
         HStack(spacing: 10) {
             if let highlighted {
                 let excluded = entry.planCourse.excludedCRNs.contains(highlighted.crn)
@@ -362,7 +367,8 @@ struct MacSectionPickerSheet: View {
             Spacer()
             if current != nil {
                 Button("Remove Section", role: .destructive) { clear(entry: entry) }
-                    .help("Take this course’s section out of the schedule")
+                    .disabled(!canClear)
+                    .help(canClear ? "Take this course’s section out of the schedule" : "Another section of this course is also on the schedule")
             }
             Button("Done") { dismiss() }
                 .keyboardShortcut(.cancelAction)
@@ -404,22 +410,31 @@ struct MacSectionPickerSheet: View {
 
     private func choose(_ crn: String, entry: ResolvedPlan.Entry) {
         editor.perform("Change Section") { plan in
-            PlanEditing.setSection(crn, courseCRNs: entry.courseCRNs, in: &plan)
+            PlanEditing.setSection(crn, courseCRNs: entry.courseCRNs, entryID: entry.id, in: &plan)
         }
         dismiss()
     }
 
     private func clear(entry: ResolvedPlan.Entry) {
         editor.perform("Remove Section") { plan in
-            PlanEditing.setSection(nil, courseCRNs: entry.courseCRNs, in: &plan)
+            PlanEditing.setSection(nil, courseCRNs: entry.courseCRNs, entryID: entry.id, in: &plan)
         }
         dismiss()
     }
 
     private func setExcluded(_ excluded: Bool, crn: String) {
         userData.updatePlan(id: planID) { plan in
-            PlanEditing.setExcluded(excluded, crn: crn, for: courseKey, in: &plan)
+            if let entryID {
+                PlanEditing.setExcluded(excluded, crn: crn, entryID: entryID, in: &plan)
+            } else {
+                PlanEditing.setExcluded(excluded, crn: crn, for: courseKey, in: &plan)
+            }
         }
+    }
+
+    private func planEntry(in resolved: ResolvedPlan) -> ResolvedPlan.Entry? {
+        if let entryID, let entry = resolved.entry(id: entryID) { return entry }
+        return resolved.entry(for: courseKey)
     }
 
     /// Instructors are fetched lazily; this makes them appear in the table (and says so when it can't).

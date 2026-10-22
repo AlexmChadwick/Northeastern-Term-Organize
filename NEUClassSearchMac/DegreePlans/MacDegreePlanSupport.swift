@@ -130,6 +130,7 @@ struct MacDegreePlanEditor {
     func perform(_ actionName: String, touching parts: Parts = .courses, _ change: (inout DegreePlan) -> Void) {
         guard let before = userData.degreePlan(id: planID) else { return }
         userData.updateDegreePlan(id: planID, change)
+        if parts.contains(.courses) { userData.syncChosenCredits(fromDegreePlan: planID) }
         register(actionName, parts: parts, restore: Self.restorer(for: before, parts: parts))
     }
 
@@ -163,6 +164,7 @@ struct MacDegreePlanEditor {
                 guard let current = store.degreePlan(id: planID) else { return }
                 let redo = Self.restorer(for: current, parts: parts)
                 store.updateDegreePlan(id: planID) { restore(&$0) }
+                if parts.contains(.courses) { store.syncChosenCredits(fromDegreePlan: planID) }
                 // Registered while undoing, so the undo manager keeps it as the redo.
                 MacDegreePlanEditor(userData: store, planID: planID, undoManager: undoManager)
                     .register(actionName, parts: parts, restore: redo)
@@ -303,6 +305,6 @@ extension MacDegreePlanEditor {
     /// A plan course (completed or planned) from a `DegreePlanCourse` search result: the
     /// catalog's title shortened like the degree audit's, and its (maximum) credits.
     static func newCourse(from course: Course) -> DegreePlanCourse {
-        DegreePlanCourse(key: course.key, title: DegreePlanFormat.exportTitle(course.title), credits: course.maxCredits)
+        DegreePlanCourse(key: course.key, title: DegreePlanFormat.exportTitle(course.title), credits: course.defaultChoiceCredits)
     }
 }

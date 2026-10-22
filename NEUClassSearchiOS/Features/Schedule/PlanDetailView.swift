@@ -37,7 +37,7 @@ struct PlanDetailView: View {
 
     private enum PlanSheet: Identifiable, Hashable {
         case section(String)
-        case picker(CourseKey)
+        case picker(CourseKey, String?)
         case addCourse
         case filters
         case preferences
@@ -47,7 +47,7 @@ struct PlanDetailView: View {
         var id: String {
             switch self {
             case .section(let crn): "section-\(crn)"
-            case .picker(let key): "picker-\(key)"
+            case .picker(let key, let entryID): "picker-\(entryID ?? key.description)"
             case .addCourse: "add-course"
             case .filters: "filters"
             case .preferences: "preferences"
@@ -335,8 +335,11 @@ struct PlanDetailView: View {
                     entry: entry,
                     termName: termName,
                     conflictingKeys: conflictingKeys(for: entry, in: resolved),
-                    onOpen: { sheet = .picker(entry.key) },
-                    onToggleRequired: { toggleRequired(entry) }
+                    onOpen: { sheet = .picker(entry.key, entry.id) },
+                    onToggleRequired: { toggleRequired(entry) },
+                    onSetCredits: { credits in
+                        userData.setScheduleCourseCredits(planID: plan.id, entryID: entry.id, credits: credits)
+                    }
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {
@@ -355,7 +358,7 @@ struct PlanDetailView: View {
                 }
                 .contextMenu {
                     Button {
-                        sheet = .picker(entry.key)
+                        sheet = .picker(entry.key, entry.id)
                     } label: {
                         Label("Choose Section", systemImage: "checklist")
                     }
@@ -540,14 +543,14 @@ struct PlanDetailView: View {
             PlanSectionSheet(
                 planID: planID,
                 crn: crn,
-                onChangeSection: { key in self.sheet = .picker(key) },
+                onChangeSection: { key, entryID in self.sheet = .picker(key, entryID) },
                 onViewCourse: { key in
                     self.sheet = nil
                     router.navigate(to: .course(termCode: plan.termCode, key: key))
                 }
             )
-        case .picker(let key):
-            SectionPickerSheet(planID: planID, courseKey: key)
+        case .picker(let key, let entryID):
+            SectionPickerSheet(planID: planID, courseKey: key, entryID: entryID)
         case .addCourse:
             PlanCourseSearchSheet(planID: planID)
         case .filters:
@@ -597,7 +600,7 @@ struct PlanDetailView: View {
 
     private func toggleRequired(_ entry: ResolvedPlan.Entry) {
         let required = !entry.planCourse.isRequired
-        userData.updatePlan(id: planID) { PlanEditing.setRequired(required, for: entry.key, in: &$0) }
+        userData.updatePlan(id: planID) { PlanEditing.setRequired(required, entryID: entry.id, in: &$0) }
         haptic.fire(.selection)
     }
 

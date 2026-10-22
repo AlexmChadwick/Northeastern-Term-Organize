@@ -38,8 +38,12 @@ struct SearchFilterBar: View {
     var body: some View {
         GlassChipBar {
             filtersChip
+            DegreeLevelFilterPicker(filters: $model.filters)
+                .frame(maxWidth: 260)
             openSeatsChip
             honorsChip
+            noPrerequisitesChip
+            noCorequisitesChip
             nupathMenu
             subjectMenu
             daysMenu
@@ -86,6 +90,20 @@ struct SearchFilterBar: View {
         GlassChip(title: "Honors", systemImage: "star", isOn: filters.honorsOnly) {
             model.filters.honorsOnly.toggle()
         }
+    }
+
+    private var noPrerequisitesChip: some View {
+        GlassChip(title: "No prerequisites", systemImage: "checklist", isOn: filters.noPrerequisites) {
+            model.filters.noPrerequisites.toggle()
+        }
+        .accessibilityHint("Shows courses whose loaded catalog entry lists no prerequisites")
+    }
+
+    private var noCorequisitesChip: some View {
+        GlassChip(title: "No corequisites", systemImage: "link", isOn: filters.noCorequisites) {
+            model.filters.noCorequisites.toggle()
+        }
+        .accessibilityHint("Shows courses whose loaded catalog entry lists no corequisites")
     }
 
     // MARK: Menus

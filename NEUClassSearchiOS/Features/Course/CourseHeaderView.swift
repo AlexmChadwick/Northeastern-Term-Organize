@@ -14,6 +14,7 @@ struct CourseHeaderView: View {
     var course: Course
     var term: Term
     var hasHonorsSections: Bool
+    var caption: String? = nil
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(UserDataStore.self) private var userData
@@ -37,6 +38,9 @@ struct CourseHeaderView: View {
                 Text(affiliation)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+            }
+            if let caption {
+                CatalogCaption(text: caption)
             }
             chips
                 .padding(.top, 2)

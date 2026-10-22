@@ -13,6 +13,8 @@ import UniformTypeIdentifiers
 /// The main window: a sidebar of areas, schedules and degree plans, and the selected area.
 struct MacRootView: View {
     @Environment(MacNavigator.self) private var navigator
+    @Environment(CatalogStore.self) private var catalog
+    @Environment(UserDataStore.self) private var userData
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -52,6 +54,9 @@ struct MacRootView: View {
             }
         }
         .macShell()
+        .task(id: catalog.indexVersion) {
+            userData.reconcileChosenCredits { catalog.cachedIndex(for: $0) }
+        }
     }
 
     /// Course links open a course window; everything else goes to the navigator.

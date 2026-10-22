@@ -28,6 +28,8 @@ struct MacSearchFilterBar: View {
 
     var body: some View {
         CourseFlowLayout(spacing: 8, lineSpacing: 6) {
+            DegreeLevelFilterPicker(filters: $state.filters)
+                .frame(width: 240)
             Toggle(isOn: $state.filters.openSeatsOnly) {
                 Label("Open Seats", systemImage: "chair")
             }
@@ -39,6 +41,18 @@ struct MacSearchFilterBar: View {
             }
             .toggleStyle(.button)
             .help("Show only courses with an honors section")
+
+            Toggle(isOn: $state.filters.noPrerequisites) {
+                Label("No prerequisites", systemImage: "checklist")
+            }
+            .toggleStyle(.button)
+            .help("Show courses whose loaded catalog entry lists no prerequisites. Courses whose requisites have not been loaded are left out.")
+
+            Toggle(isOn: $state.filters.noCorequisites) {
+                Label("No corequisites", systemImage: "link")
+            }
+            .toggleStyle(.button)
+            .help("Show courses whose loaded catalog entry lists no corequisites. Courses whose requisites have not been loaded are left out.")
 
             nupathMenu
             subjectMenu

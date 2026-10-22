@@ -27,6 +27,11 @@ struct MacCourseSectionDetails: View {
     var body: some View {
         ScrollView {
             Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 7) {
+                if CPSNote.isCPSOnly(section.restrictions) == true {
+                    row("Restriction") {
+                        CatalogCaption(text: CPSNote.only)
+                    }
+                }
                 row("Section") { sectionTitle }
                 row("Meets") { meetings }
                 if let place = whereLabel {

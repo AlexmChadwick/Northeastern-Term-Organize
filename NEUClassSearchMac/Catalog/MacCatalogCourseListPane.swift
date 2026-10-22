@@ -100,7 +100,13 @@ struct MacCatalogCourseListPane: View {
 
     var body: some View {
         let shown = self.shown
-        let rows = shown.map { MacCatalogCourseRow(course: $0, stats: index.stats(for: $0.key)) }
+        let rows = shown.map {
+            MacCatalogCourseRow(
+                course: $0,
+                stats: index.stats(for: $0.key),
+                caption: CPSNote.courseCaption(sections: index.sections(for: $0.key))
+            )
+        }
         VStack(spacing: 0) {
             if !courses.isEmpty {
                 filterBar
@@ -143,6 +149,7 @@ struct MacCatalogCourseListPane: View {
             hasher.combine(row.key)
             hasher.combine(row.stats.seatsRemaining)
             hasher.combine(row.stats.openSectionCount)
+            hasher.combine(row.caption)
         }
         return hasher.finalize()
     }

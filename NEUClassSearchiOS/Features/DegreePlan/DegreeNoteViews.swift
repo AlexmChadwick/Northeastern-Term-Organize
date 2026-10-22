@@ -65,7 +65,7 @@ enum DegreeRequirementNotes {
 // MARK: - Row
 
 /// A sentence of the catalog with the app's check of it: a status icon, the sentence and how the plan
-/// stands (`74 of 72 semester hours · 8 planned`, `COOP 3946 completed`). A check made of several
+/// stands (`66 of 72 semester hours · 8 planned`, `COOP 3946 completed`). A check made of several
 /// parts (each NUpath requirement) lists them below, behind a disclosure when there are many, and
 /// offers to find courses for a NUpath requirement still open. A sentence the app can't check says so,
 /// in neutral colors.

@@ -38,7 +38,8 @@ struct CourseDetailContent: View {
                     CourseHeaderView(
                         course: course,
                         term: index.term,
-                        hasHonorsSections: index.stats(for: course.key).hasHonors
+                        hasHonorsSections: index.stats(for: course.key).hasHonors,
+                        caption: CPSNote.courseCaption(sections: index.sections(for: course.key))
                     )
                     .padding(.horizontal, Theme.Spacing.l)
 

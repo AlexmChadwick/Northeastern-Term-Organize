@@ -13,7 +13,7 @@ Term Organize is an early beta. It is unofficial and not affiliated with Northea
 
 ### Mac
 
-1. Download `Term-Organize-1.1.1-3.zip` from the [v1.1.1 release](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases/tag/v1.1.1). Newer builds go on the [Releases page](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases).
+1. Download `Term-Organize-1.1.2-4.zip` from the [v1.1.2 release](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases/tag/v1.1.2). Newer builds go on the [Releases page](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases).
 2. Unzip it and drag **Term Organize** into your Applications folder.
 3. Open it. The build is signed with a Developer ID (team `832J6JB4V7`) and notarized by Apple, so macOS opens it without extra steps.
 

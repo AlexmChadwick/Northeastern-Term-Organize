@@ -77,16 +77,16 @@ struct DegreeRequirementsContext {
         requirements?.degreeShortName(ofRule: id) ?? fallback
     }
 
-    /// `Counts toward Khoury Elective Courses` for a course of the plan (completed when
-    /// `semester` is nil). Only the instance the audit counts gets a note: a course listed twice
-    /// counts once.
+    /// `Counts toward Khoury Elective Courses` for one row of the plan (completed when
+    /// `semester` is nil). The note is for this attempt, not for every row with the same
+    /// course number: a completed CS 4973 and a planned CS 4973 can count in different places.
     func requirementNote(for course: DegreePlanCourse, semester: DegreePlanTerm?) -> String? {
-        guard let key = course.key, let audit, let requirements,
-              let result = audit.ruleCounting(key),
-              let use = result.used.first(where: { $0.key == key }),
-              use.semester == semester?.name, use.credits == course.credits else { return nil }
+        guard let audit, let requirements,
+              let counted = audit.countedUse(of: course, semester: semester?.name, in: plan) else { return nil }
+        let result = counted.result
+        let use = counted.use
         if result.rule.degreeIsGeneralElectives { return "Counts as a general elective" }
-        let name = requirements.degreeCountingName(ofRule: result.rule.id, for: key) ?? result.rule.displayLabel
+        let name = requirements.degreeCountingName(ofRule: result.rule.id, for: use.key) ?? result.rule.displayLabel
         if use.bySubstitution { return "Counts toward \(name) by substitution" }
         // Counted through an equivalence: `Counts as CS 2100` for a requirement that names the
         // course, `Counts toward Software Concentration as CS 3100` for a list.

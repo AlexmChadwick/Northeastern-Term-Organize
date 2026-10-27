@@ -298,7 +298,7 @@ struct MacDegreeRuleRowView: View {
         MacDegreeCatalogCourseRow(
             key: key,
             title: page.lookup.title(of: key),
-            credits: page.lookup.credits(of: key),
+            credits: use?.credits ?? page.lookup.credits(of: key),
             connector: connector,
             status: info.status,
             isCountedHere: info.isCountedHere,

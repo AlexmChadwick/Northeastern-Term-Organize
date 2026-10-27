@@ -242,7 +242,7 @@ struct DegreeRequirementRuleSheet: View {
         DegreeCatalogCourseRow(
             key: key,
             title: lookup.title(of: key),
-            credits: lookup.credits(of: key),
+            credits: counted?.credits ?? lookup.credits(of: key),
             connector: connector,
             status: info.status,
             isCountedHere: info.isCountedHere,

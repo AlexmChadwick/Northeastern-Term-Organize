@@ -86,6 +86,8 @@ struct DegreeCourseLookup {
     private let inProgressHints: [CourseKey: String]
     private let completedHints: [CourseKey: String]
     private let semestersInSession: Set<String>
+    /// `Summer Session A 2027` to `Summer A 2027`, so a planned attempt uses the short name.
+    private let semesterShortNames: [String: String]
     private let bannerCourse: (CourseKey) -> Course?
 
     /// - Parameters:
@@ -130,6 +132,7 @@ struct DegreeCourseLookup {
         semestersInSession = Set(plan.terms.filter { term in
             TermCalendar.approximateWindow(for: term.degreePlanBannerCode)?.contains(now) ?? false
         }.map(\.name))
+        semesterShortNames = plan.degreeSemesterShortNames
     }
 
     func status(of key: CourseKey) -> DegreeCourseStatus {
@@ -140,6 +143,17 @@ struct DegreeCourseLookup {
         }
         if let term = inProgressHints[key] { return .inProgress(term: term) }
         return .completed(term: completedHints[key])
+    }
+
+    /// Status of one counted attempt. Another attempt of the same course number does not
+    /// decide it: a completed CS 4973 must not mark a planned CS 4973 completed.
+    func status(of use: DegreeAudit.CourseUse) -> DegreeCourseStatus {
+        if let semester = use.semester {
+            let name = semesterShortNames[semester] ?? semester
+            return semestersInSession.contains(semester) ? .inProgress(term: name) : .planned(term: name)
+        }
+        if let term = inProgressHints[use.key] { return .inProgress(term: term) }
+        return .completed(term: completedHints[use.key])
     }
 
     /// The catalog's title, else Banner's (a loaded term's, then its course catalog's), else the
@@ -187,15 +201,16 @@ struct DegreeCourseLookup {
     /// requirement counts that it doesn't list.
     func rowInfo(for key: CourseKey, in result: DegreeAudit.RuleResult, counted: DegreeAudit.CourseUse? = nil) -> DegreeCourseRowInfo {
         if let use = counted ?? result.use(for: key) {
+            let standing = status(of: use)
             if use.key != key {
                 // Another course of the plan counts as this one (CS 2510 for CS 2100).
                 return DegreeCourseRowInfo(
-                    status: status(of: use.key), isCountedHere: true, bySubstitution: use.bySubstitution,
+                    status: standing, isCountedHere: true, bySubstitution: use.bySubstitution,
                     caption: "Via \(use.key) (\(use.countsAsLabel ?? "counts as \(key)"))"
                 )
             }
             return DegreeCourseRowInfo(
-                status: status(of: key), isCountedHere: true, bySubstitution: use.bySubstitution,
+                status: standing, isCountedHere: true, bySubstitution: use.bySubstitution,
                 caption: use.satisfies.map { "Counts as \($0)" }
             )
         }

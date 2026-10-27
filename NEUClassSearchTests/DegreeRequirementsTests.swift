@@ -359,6 +359,67 @@ struct DegreeRequirementsTests {
         #expect(blank.completedHours == 0)
     }
 
+    /// One completed CS 4973 and two planned Spring 2027 CS 4973s. The petition counts two
+    /// distinct attempts. A planned attempt is not shown completed just because another
+    /// CS 4973 already is, and the plan note follows that same attempt.
+    @Test func plannedTopicsAttemptsKeepTheirOwnStatusOnASubstitution() throws {
+        let requirements = try Self.requirements()
+        let science = try #require(requirements.allRules.first { $0.label.hasPrefix("Complete two courses") })
+        let electives = try #require(requirements.allRules.first { $0.label.hasPrefix("Complete 8 semester hours of CS") })
+
+        var plan = DegreePlan(name: "Topics attempts")
+        let completed = Self.course("CS 4973", 4, "Special Topics")
+        let firstPlanned = Self.course("CS 4973", 4, "Special Topics")
+        let secondPlanned = Self.course("CS 4973", 4, "Special Topics")
+        plan.completed = [completed]
+        var spring = DegreePlanTerm(season: .spring, year: 2027)
+        spring.courses = [firstPlanned, secondPlanned]
+        plan.terms = [spring]
+        plan.substitutions = [RequirementSubstitution(
+            ruleID: science.id, ruleTitle: "Science Requirement",
+            change: .replace(RequirementReplacement(count: 2, likeRuleID: electives.id, likeRuleTitle: "Khoury Elective Courses"))
+        )]
+
+        let audit = DegreeAudit.run(plan: plan, requirements: requirements)
+        let scienceResult = try #require(audit.result(for: science.id))
+        #expect(scienceResult.status == .planned)
+        #expect(scienceResult.remainingCount == 0)
+        #expect(DegreeRequirementText.progress(scienceResult) == "2 of 2 planned")
+        #expect(scienceResult.used.count == 2)
+        let instances = Set(scienceResult.used.map(\.instance))
+        #expect(instances.count == 2)
+        let completedUses = scienceResult.used.filter { $0.semester == nil }
+        let plannedUses = scienceResult.used.filter { $0.semester == "Spring 2027" }
+        #expect(completedUses.count == 1)
+        #expect(plannedUses.count == 1)
+        let completedUse = try #require(completedUses.first)
+        let plannedUse = try #require(plannedUses.first)
+        #expect(completedUse.credits == 4)
+        #expect(plannedUse.credits == 4)
+        #expect(completedUse.key.description == "CS 4973")
+        #expect(plannedUse.key.description == "CS 4973")
+
+        // Far from Spring 2027, so that semester is planned rather than in progress.
+        let lookup = DegreeCourseLookup(
+            plan: plan, requirements: requirements, audit: audit, schedulePlans: [],
+            termName: { $0 }, bannerCourse: { _ in nil }, now: Date(timeIntervalSinceReferenceDate: 0)
+        )
+        let completedInfo = lookup.rowInfo(for: completedUse.key, in: scienceResult, counted: completedUse)
+        let plannedInfo = lookup.rowInfo(for: plannedUse.key, in: scienceResult, counted: plannedUse)
+        #expect(completedInfo.status == .completed(term: nil))
+        #expect(completedInfo.status.label == "Completed")
+        #expect(plannedInfo.status == .planned(term: "Spring 2027"))
+        #expect(plannedInfo.status.label == "Planned · Spring 2027")
+
+        let editions = CatalogEditions(current: CatalogYear(startYear: 2023), archived: [], fetchedAt: .now)
+        let context = DegreeRequirementsContext(
+            plan: plan, requirements: requirements, state: .idle, editions: editions, audit: audit, milestone: nil
+        )
+        #expect(context.requirementNote(for: completed, semester: nil) == "Counts toward Science Requirement")
+        #expect(context.requirementNote(for: firstPlanned, semester: spring) == "Counts toward Science Requirement")
+        #expect(context.requirementNote(for: secondPlanned, semester: spring) == "Counts toward Khoury Elective Courses")
+    }
+
     /// A course one list can do without moves to a requirement that needs it: HIST 2220 fills
     /// "Computing and Social Issues" so that CY 4170 can be a Khoury elective — even when
     /// HIST 2220 first has to be replaced in another list. Mirrors a real plan that the first

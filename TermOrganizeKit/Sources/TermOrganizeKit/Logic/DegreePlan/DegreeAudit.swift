@@ -251,9 +251,51 @@ struct DegreeAudit: Sendable {
         return nil
     }
 
-    /// Where a course counts, if anywhere.
+    /// Where a course counts, if anywhere. The first requirement that uses the course number.
+    /// A plan row with its own attempt should use `countedUse(of:semester:in:)`.
     func ruleCounting(_ key: CourseKey) -> RuleResult? {
         ruleResults.first { $0.used.contains { $0.key == key } }
+    }
+
+    /// The attempt this plan row is, when the audit counted it. Copies of one course number
+    /// are paired in plan order (completed rows, then each semester), the same order the
+    /// audit offers them, so a completed CS 4973 is not the row for a later planned CS 4973.
+    /// A line with no credit is not an attempt.
+    func countedUse(of course: DegreePlanCourse, semester: String?, in plan: DegreePlan) -> (result: RuleResult, use: CourseUse)? {
+        guard let key = course.key, course.credits > 0,
+              let instance = Self.attemptInstance(of: course.id, key: key, semester: semester, in: plan) else { return nil }
+        for result in ruleResults {
+            if let use = result.used.first(where: { $0.key == key && $0.instance == instance }) {
+                return (result, use)
+            }
+        }
+        return nil
+    }
+
+    /// Which admitted copy `courseID` is. Matches `AuditEngine.offer`: the first line of a
+    /// course is kept even with no credit, and every later line with credit is its own copy.
+    private static func attemptInstance(of courseID: UUID, key: CourseKey, semester: String?, in plan: DegreePlan) -> Int? {
+        var admitted = 0
+        func visit(_ row: DegreePlanCourse, rowSemester: String?) -> Int? {
+            guard row.key == key else { return nil }
+            if row.credits <= 0 {
+                if admitted == 0 { admitted = 1 }
+                return nil
+            }
+            let instance = admitted
+            admitted += 1
+            if row.id == courseID, rowSemester == semester { return instance }
+            return nil
+        }
+        for row in plan.completed {
+            if let instance = visit(row, rowSemester: nil) { return instance }
+        }
+        for term in plan.terms {
+            for row in term.courses {
+                if let instance = visit(row, rowSemester: term.name) { return instance }
+            }
+        }
+        return nil
     }
 
     /// - Parameter equivalences: which courses count as which (`CourseInfoStore.equivalences(for:)`);

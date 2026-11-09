@@ -69,11 +69,22 @@ final class CloudSyncController {
     private var isSending = false
     private var isSyncingManually = false
     /// The first sync with an account looks at iCloud before sending anything, so values
-    /// that already match aren't uploaded again.
+    /// that already match aren't uploaded again. A sign-in still queues local records:
+    /// that event clears whatever was pending, and waiting on the fetch would leave the
+    /// queue empty if the fetch never finishes.
     private var isAwaitingFirstFetch = false
+    /// A fetch or send reported an error. Retried errors stay off the status line, but
+    /// they still mean this pass did not finish.
+    private var fetchFailed = false
+    private var sendFailed = false
     private var lastFetchRequest: Date?
     private var evaluationTask: Task<Void, Never>?
+    private var accountRetryTask: Task<Void, Never>?
+    /// Indeterminate account checks since the app last became active.
+    private var accountStatusAttempts = 0
     private var needsEvaluation = false
+    private var didResolveEnvironment = false
+    private static let accountCheckMessage = "Couldn't check your iCloud account. Sync will try again later."
     private var metadataSaveTask: Task<Void, Never>?
     private var accountObserver: (any NSObjectProtocol)?
     /// Fingerprints of the values in the batch being sent, by record.
@@ -91,6 +102,7 @@ final class CloudSyncController {
         status.actions = self
         status.isEnabled = UserDefaults.standard.object(forKey: Self.enabledDefaultsKey) as? Bool ?? true
         status.isConfiguredInBuild = CloudSyncConfig.containerIdentifier() != nil
+        resolveCloudKitEnvironment()
         guard status.isConfiguredInBuild else {
             // Without a container nothing is tracked and CloudKit is never touched.
             refreshStatus()
@@ -100,6 +112,25 @@ final class CloudSyncController {
         refreshStatus()
         // Read the bookkeeping once launch has finished.
         Task { [weak self] in self?.prepare() }
+    }
+
+    /// Reads the signature off the main actor. The checked-in entitlements don't name a
+    /// database; the signed copy or the provisioning profile does.
+    private func resolveCloudKitEnvironment() {
+        guard !didResolveEnvironment else { return }
+        didResolveEnvironment = true
+        Task.detached(priority: .utility) { [weak self] in
+            let environment = CloudSyncDiagnostics.environment(
+                entitlements: CloudSyncEntitlements.currentEntitlements(),
+                provisioningProfile: CloudSyncEntitlements.embeddedProvisioningProfile()
+            )
+            await self?.applyCloudKitEnvironment(environment)
+        }
+    }
+
+    private func applyCloudKitEnvironment(_ environment: CloudSyncContainerEnvironment?) {
+        status.cloudKitEnvironment = environment
+        logger.notice("CloudKit environment: \(environment?.rawValue ?? "unknown", privacy: .public)")
     }
 
     private func prepare() {
@@ -134,6 +165,9 @@ final class CloudSyncController {
     /// if the account changed in the meantime.
     func appDidBecomeActive() {
         guard isPrepared, status.isEnabled else { return }
+        // A cold launch does not come through here, so an early "couldn't check" gets its
+        // own retries. Coming back to the app starts that count over.
+        accountStatusAttempts = 0
         guard engine != nil else {
             requestEvaluation()
             return
@@ -156,7 +190,7 @@ final class CloudSyncController {
         }
         guard let engine else { return .noData }
         do {
-            try await engine.fetchChanges()
+            try await Self.fetchChanges(on: engine)
             return .newData
         } catch {
             return .failed
@@ -208,8 +242,8 @@ final class CloudSyncController {
         do {
             accountStatus = try await container.accountStatus()
         } catch {
-            accountIssue = "Couldn't check your iCloud account. Sync will try again later."
             logger.error("Account status failed: \(error.localizedDescription, privacy: .public)")
+            failAccountCheck()
             refreshStatus()
             return
         }
@@ -222,6 +256,7 @@ final class CloudSyncController {
 
         switch accountStatus {
         case .available:
+            noteDefinitiveAccount("Available")
             unavailableReason = nil
             guard engine == nil else { break }
             let savedState = files.loadEngineState()
@@ -231,8 +266,8 @@ final class CloudSyncController {
                 do {
                     current = try await container.userRecordID()
                 } catch {
-                    accountIssue = "Couldn't check your iCloud account. Sync will try again later."
                     logger.error("User record lookup failed: \(error.localizedDescription, privacy: .public)")
+                    failAccountCheck()
                     break
                 }
                 guard status.isEnabled, engine == nil else { break }
@@ -243,21 +278,55 @@ final class CloudSyncController {
             }
             startEngine(container: container, savedState: savedState)
         case .noAccount:
+            noteDefinitiveAccount("No Account")
             unavailableReason = .noAccount
             retireEngine()
         case .restricted:
+            noteDefinitiveAccount("Restricted")
             unavailableReason = .restricted
             retireEngine()
         case .temporarilyUnavailable:
-            // Keep everything; CKAccountChanged arrives once the account is usable again.
+            // Keep the saved state. The account often recovers without another visit to
+            // the foreground, so retry instead of waiting on that.
+            status.accountStatusLabel = "Temporarily Unavailable"
             unavailableReason = .temporarilyUnavailable
             retireEngine()
+            scheduleAccountRetry()
         case .couldNotDetermine:
-            accountIssue = "Couldn't check your iCloud account. Sync will try again later."
+            failAccountCheck()
         @unknown default:
-            accountIssue = "Couldn't check your iCloud account. Sync will try again later."
+            failAccountCheck()
         }
         refreshStatus()
+    }
+
+    /// A definitive answer. Stops the launch retries.
+    private func noteDefinitiveAccount(_ label: String) {
+        accountStatusAttempts = 0
+        accountRetryTask?.cancel()
+        accountRetryTask = nil
+        status.accountStatusLabel = label
+    }
+
+    /// The account check didn't get a usable answer. The status line says we'll try again;
+    /// this is what actually tries again while the app stays open.
+    private func failAccountCheck() {
+        accountIssue = Self.accountCheckMessage
+        status.accountStatusLabel = "Unknown"
+        status.lastErrorSummary = Self.accountCheckMessage
+        scheduleAccountRetry()
+    }
+
+    private func scheduleAccountRetry() {
+        accountStatusAttempts += 1
+        guard CloudSyncDiagnostics.retriesAccountStatus(afterAttempt: accountStatusAttempts) else { return }
+        accountRetryTask?.cancel()
+        accountRetryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled, let self, self.status.isEnabled else { return }
+            self.accountRetryTask = nil
+            self.requestEvaluation()
+        }
     }
 
     private func startEngine(container: CKContainer, savedState: CKSyncEngine.State.Serialization?) {
@@ -280,17 +349,27 @@ final class CloudSyncController {
             Task { [weak self] in
                 var failure: Error?
                 do {
-                    try await engine.fetchChanges()
+                    try await Self.fetchChanges(on: engine)
                 } catch {
                     failure = error
                 }
-                self?.finishFirstFetch(of: engine, failure: failure)
+                await self?.finishFirstFetch(of: engine, failure: failure)
             }
         } else {
             syncLocalChanges()
             fetchIfDue(force: true)
         }
         refreshStatus()
+    }
+
+    /// Leaves the main actor before calling the engine. The delegate hops back to it, and
+    /// CloudKit traps if an engine call runs on the same turn as a delegate callback.
+    private static func fetchChanges(on engine: CKSyncEngine) async throws {
+        try await Task.detached { try await engine.fetchChanges() }.value
+    }
+
+    private static func sendChanges(on engine: CKSyncEngine) async throws {
+        try await Task.detached { try await engine.sendChanges() }.value
     }
 
     private func finishFirstFetch(of engine: CKSyncEngine, failure: Error?) {
@@ -309,8 +388,10 @@ final class CloudSyncController {
         isSending = false
         isSyncingManually = false
         isAwaitingFirstFetch = false
+        fetchFailed = false
+        sendFailed = false
         sentFingerprints = [:]
-        Task { await engine.cancelOperations() }
+        Task.detached { await engine.cancelOperations() }
     }
 
     /// Forgets all sync bookkeeping (local data stays), so the next sync starts with a merge.
@@ -324,6 +405,8 @@ final class CloudSyncController {
 
     /// Turns sync off by itself, keeping the local data, and says why.
     private func turnOff(notice: String) {
+        accountRetryTask?.cancel()
+        accountRetryTask = nil
         retireEngine()
         metadata.accountRecordName = nil
         forgetICloud()
@@ -337,11 +420,11 @@ final class CloudSyncController {
 
     /// Notes local changes and queues what iCloud doesn't have yet. Runs after every local
     /// save (through `UserDataStore.didChange`) and after each batch of iCloud events.
-    private func syncLocalChanges() {
+    private func syncLocalChanges(duringFirstFetch: Bool = false) {
         guard isPrepared, let userData else { return }
         let snapshot = CloudSyncSnapshot(userData.data)
         metadata.observeLocalData(snapshot, now: .now)
-        if let engine, !isAwaitingFirstFetch {
+        if let engine, duringFirstFetch || !isAwaitingFirstFetch {
             // The engine's queue mirrors what the comparison says: missing changes are added,
             // and ones that no longer apply (say, a delete for a value just restored from
             // iCloud) are removed.
@@ -368,7 +451,7 @@ final class CloudSyncController {
         lastFetchRequest = .now
         Task { [weak self] in
             do {
-                try await engine.fetchChanges()
+                try await Self.fetchChanges(on: engine)
             } catch {
                 guard let self, engine === self.engine else { return }
                 self.note(error, userInitiated: false)
@@ -396,20 +479,27 @@ final class CloudSyncController {
             handleSentRecordZoneChanges(sent, engine: engine)
         case .willFetchChanges:
             isFetching = true
+            fetchFailed = false
         case .didFetchRecordZoneChanges(let finished):
             if let error = finished.error {
+                fetchFailed = true
                 note(error, userInitiated: false)
             } else if finished.zoneID == CloudSyncRecords.zoneID {
                 fetchIssue = nil
             }
         case .didFetchChanges:
             isFetching = false
-            if fetchIssue == nil { markSynced() }
+            if CloudSyncDiagnostics.countsAsSynced(zoneIsSaved: metadata.isZoneSaved, failed: fetchFailed, hasVisibleIssue: fetchIssue != nil) {
+                markSynced()
+            }
         case .willSendChanges:
             isSending = true
+            sendFailed = false
         case .didSendChanges:
             isSending = false
-            if sendIssue == nil { markSynced() }
+            if CloudSyncDiagnostics.countsAsSynced(zoneIsSaved: metadata.isZoneSaved, failed: sendFailed, hasVisibleIssue: sendIssue != nil) {
+                markSynced()
+            }
         case .willFetchRecordZoneChanges:
             break
         @unknown default:
@@ -429,11 +519,14 @@ final class CloudSyncController {
             // local value are queued again; values iCloud already has are matched by the fetch.
             metadata.accountRecordName = currentUser.recordName
             unavailableReason = nil
+            status.accountStatusLabel = "Available"
+            // Starting the engine with no saved state always posts this event, and the
+            // engine drops pending changes when it does — including the zone queued above.
             if !metadata.isZoneSaved {
                 engine.state.add(pendingDatabaseChanges: [.saveZone(CloudSyncRecords.zone)])
             }
             saveMetadata(immediately: true)
-            syncLocalChanges()
+            syncLocalChanges(duringFirstFetch: true)
         case .signOut(let previousUser):
             // Keep the data on this device; forget the account's bookkeeping and stop. The
             // account is remembered so that signing in to a different one doesn't merge.
@@ -442,6 +535,7 @@ final class CloudSyncController {
             metadata.accountRecordName = previousUser.recordName
             saveMetadata(immediately: true)
             unavailableReason = .noAccount
+            status.accountStatusLabel = "No Account"
         case .switchAccounts:
             accountDidSwitch()
         @unknown default:
@@ -499,6 +593,7 @@ final class CloudSyncController {
             saveMetadata()
         }
         for failure in sent.failedZoneSaves where failure.zone.zoneID == CloudSyncRecords.zoneID {
+            sendFailed = true
             note(failure.error, userInitiated: false)
         }
     }
@@ -519,6 +614,9 @@ final class CloudSyncController {
         var conflicts: [CloudSyncIncomingRecord] = []
         var retries: [CKSyncEngine.PendingRecordZoneChange] = []
         var failure: CKError?
+        if !sent.failedRecordSaves.isEmpty || !sent.failedRecordDeletes.isEmpty {
+            sendFailed = true
+        }
         for failed in sent.failedRecordSaves {
             let recordID = failed.record.recordID
             switch failed.error.code {
@@ -615,15 +713,22 @@ final class CloudSyncController {
 
     private func markSynced() {
         metadata.lastSyncDate = .now
+        status.lastErrorSummary = nil
         saveMetadata()
     }
 
     /// Records an error for the status line (or stops, for errors that mean sync can't work).
+    /// Retried errors stay off the status line; the diagnostics line still keeps the latest one.
     private func note(_ error: Error, userInitiated: Bool) {
         logger.error("Sync error: \(error.localizedDescription, privacy: .public)")
         guard let error = error as? CKError else {
-            fetchIssue = "Couldn't sync with iCloud. Sync will try again later."
+            let message = "Couldn't sync with iCloud. Sync will try again later."
+            status.lastErrorSummary = message
+            fetchIssue = message
             return
+        }
+        if error.code != .operationCancelled {
+            status.lastErrorSummary = message(for: error)
         }
         switch error.code {
         case .badContainer, .missingEntitlement:
@@ -632,9 +737,11 @@ final class CloudSyncController {
             return
         case .managedAccountRestricted:
             unavailableReason = .restricted
+            status.accountStatusLabel = "Restricted"
             retireEngine()
             return
         case .notAuthenticated:
+            status.accountStatusLabel = "No Account"
             requestEvaluation()
             return
         case .operationCancelled:
@@ -643,7 +750,16 @@ final class CloudSyncController {
             break
         }
         guard userInitiated || !Self.retriedErrorCodes.contains(error.code) else { return }
-        let message: String = switch error.code {
+        let message = message(for: error)
+        if error.code == .quotaExceeded || error.code == .limitExceeded {
+            sendIssue = message
+        } else {
+            fetchIssue = message
+        }
+    }
+
+    private func message(for error: CKError) -> String {
+        switch error.code {
         case .networkUnavailable, .networkFailure:
             "You're offline. Changes will sync when you're back online."
         case .quotaExceeded:
@@ -656,18 +772,18 @@ final class CloudSyncController {
             "Update Term Organize to keep syncing."
         case .limitExceeded:
             "Some data is too large to sync."
+        case .notAuthenticated:
+            "Sign in to iCloud in Settings to sync."
         default:
             "Couldn't sync with iCloud. Sync will try again later."
-        }
-        if error.code == .quotaExceeded || error.code == .limitExceeded {
-            sendIssue = message
-        } else {
-            fetchIssue = message
         }
     }
 
     private func refreshStatus() {
         status.erasesICloudData = status.isConfiguredInBuild && status.isEnabled && metadata.hasDataInICloud
+        if status.lastSyncDate != metadata.lastSyncDate {
+            status.lastSyncDate = metadata.lastSyncDate
+        }
         let state: CloudSyncStatus.State
         if !status.isConfiguredInBuild {
             state = .unavailable(.notConfigured)
@@ -679,8 +795,9 @@ final class CloudSyncController {
             state = .syncing
         } else if let issue = accountIssue ?? sendIssue ?? fetchIssue {
             state = .error(issue)
-        } else if engine == nil {
-            // Still checking the account.
+        } else if engine == nil || !metadata.isZoneSaved {
+            // Still checking the account, or the zone isn't in iCloud yet. "Up to date"
+            // before that is how an empty iCloud container used to look successful.
             state = .syncing
         } else {
             state = .upToDate(lastSync: metadata.lastSyncDate)
@@ -712,6 +829,9 @@ final class CloudSyncController {
 extension CloudSyncController: CloudSyncActions {
     func setCloudSyncEnabled(_ isEnabled: Bool) {
         guard isEnabled != status.isEnabled else { return }
+        accountRetryTask?.cancel()
+        accountRetryTask = nil
+        accountStatusAttempts = 0
         status.isEnabled = isEnabled
         status.notice = nil
         UserDefaults.standard.set(isEnabled, forKey: Self.enabledDefaultsKey)
@@ -745,14 +865,16 @@ extension CloudSyncController: CloudSyncActions {
         isSyncingManually = true
         fetchIssue = nil
         sendIssue = nil
+        fetchFailed = false
+        sendFailed = false
         refreshStatus()
         lastFetchRequest = .now
         Task { [weak self] in
             var failure: Error?
             do {
-                try await engine.fetchChanges()
-                self?.syncLocalChanges()
-                try await engine.sendChanges()
+                try await Self.fetchChanges(on: engine)
+                await self?.syncLocalChanges()
+                try await Self.sendChanges(on: engine)
             } catch {
                 failure = error
             }
@@ -760,7 +882,7 @@ extension CloudSyncController: CloudSyncActions {
             self.isSyncingManually = false
             if let failure {
                 self.note(failure, userInitiated: true)
-            } else {
+            } else if CloudSyncDiagnostics.countsAsSynced(zoneIsSaved: self.metadata.isZoneSaved, failed: self.sendFailed || self.fetchFailed, hasVisibleIssue: false) {
                 self.markSynced()
             }
             self.refreshStatus()

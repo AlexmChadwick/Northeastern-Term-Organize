@@ -34,6 +34,11 @@ struct MacCloudSettingsPane: View {
                     }
                     .disabled(!cloudSync.canSyncNow)
                 }
+                Text(cloudSync.diagnosticsLine(relativeTo: now))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } header: {
                 Text("iCloud")
             } footer: {

@@ -33,6 +33,7 @@ struct SettingsCloudSyncSection: View {
                 }
                 .disabled(!cloudSync.canSyncNow)
             }
+            diagnosticsLine
         } header: {
             Text("iCloud")
         } footer: {
@@ -47,6 +48,17 @@ struct SettingsCloudSyncSection: View {
             get: { cloudSync.isEnabled && cloudSync.isConfiguredInBuild },
             set: { cloudSync.setEnabled($0) }
         )
+    }
+
+    /// Which CloudKit database this install uses, and the last sync. Not a control.
+    private var diagnosticsLine: some View {
+        TimelineView(.everyMinute) { context in
+            Text(cloudSync.diagnosticsLine(relativeTo: context.date))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private var statusRow: some View {

@@ -50,6 +50,15 @@ enum CloudSyncEntitlements {
         return containers.contains(containerIdentifier)
     }
 
+    /// The embedded provisioning profile, if this build has one. Development and distribution
+    /// profiles are what choose the CloudKit database when the signature doesn't name it.
+    static func embeddedProvisioningProfile() -> [String: Any]? {
+        let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision")
+            ?? Bundle.main.url(forResource: "embedded", withExtension: "provisionprofile")
+        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+        return CloudSyncDiagnostics.propertyList(inProvisioningProfile: data)
+    }
+
     /// The running app's entitlements, or nil if they can't be read.
     static func currentEntitlements() -> [String: Any]? {
         #if targetEnvironment(simulator)

@@ -360,7 +360,7 @@ final class CloudSyncController {
                 } catch {
                     failure = error
                 }
-                await self?.finishFirstFetch(of: engine, failure: failure)
+                self?.finishFirstFetch(of: engine, failure: failure)
             }
         } else {
             syncLocalChanges()
@@ -891,7 +891,7 @@ extension CloudSyncController: CloudSyncActions {
             var failure: Error?
             do {
                 try await Self.fetchChanges(on: engine)
-                await self?.syncLocalChanges()
+                self?.syncLocalChanges()
                 try await Self.sendChanges(on: engine)
             } catch {
                 failure = error

@@ -56,6 +56,8 @@ final class CloudSyncStatus {
     var erasesICloudData = false
     /// Development or Production, after the signature is read. Nil when this build doesn't say.
     var cloudKitEnvironment: CloudSyncContainerEnvironment?
+    /// False until the signature and provisioning profile have been read.
+    var didResolveCloudKitEnvironment = false
     /// Account label for the diagnostics line. "Not Checked" until the first account lookup.
     var accountStatusLabel = "Not Checked"
     /// When a fetch or send last finished with the zone in place.
@@ -80,6 +82,7 @@ final class CloudSyncStatus {
         let lastSync = lastSyncDate.map { State.relativeLabel(for: $0, relativeTo: now) } ?? "never"
         return CloudSyncDiagnostics.summary(
             environment: cloudKitEnvironment,
+            environmentResolved: didResolveCloudKitEnvironment,
             accountStatus: accountStatusLabel,
             lastSync: lastSync,
             lastError: lastErrorSummary ?? "None"

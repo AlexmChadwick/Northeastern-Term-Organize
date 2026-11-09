@@ -11,8 +11,8 @@
 //  `aps-environment` is the push environment. It does not choose the database. CloudKit
 //  uses `com.apple.developer.icloud-container-environment` when the signature has it
 //  (Xcode adds it from the provisioning profile at sign time). Otherwise a development
-//  profile (`get-task-allow`) is Development and a distribution profile — Developer ID,
-//  App Store, TestFlight, Ad Hoc — is Production. The two databases do not share records,
+//  profile (`get-task-allow`) is Development and a distribution profile (Developer ID,
+//  App Store, TestFlight, or Ad Hoc) is Production. The two databases do not share records,
 //  and Production does not create custom record types on first save.
 //
 
@@ -29,13 +29,48 @@ enum CloudSyncDiagnostics {
     /// entitlements; Xcode injects it into the signature from the profile.
     static let containerEnvironmentEntitlement = "com.apple.developer.icloud-container-environment"
 
-    /// How many indeterminate account checks to repeat while the app stays open.
-    /// The first check often runs before iCloud can answer, and a cold launch does not
-    /// get another one until the app leaves and comes back.
+    /// How many times to retry an indeterminate account check while the app stays open.
+    /// The attempt count is incremented before this check, so `1` is the first retry and
+    /// `maxAccountStatusAttempts` is the last one that still runs.
     static let maxAccountStatusAttempts = 5
 
     static func retriesAccountStatus(afterAttempt attempt: Int) -> Bool {
-        attempt < maxAccountStatusAttempts
+        attempt <= maxAccountStatusAttempts
+    }
+
+    /// Where to read the embedded provisioning profile. `Bundle.url(forResource:)` finds
+    /// `embedded.mobileprovision` and `embedded.provisionprofile` in Resources. A Mac app
+    /// keeps the profile at `Contents/embedded.provisionprofile`, beside the executable.
+    static func embeddedProvisioningProfileURL(resourceURL: URL?, bundleURL: URL) -> URL {
+        if let resourceURL { return resourceURL }
+        return bundleURL.appendingPathComponent("Contents/embedded.provisionprofile")
+    }
+
+    /// What the status row should show once a pass has settled. A retryable failure sets
+    /// `fetchFailed` or `sendFailed` without a status-line message. That is still syncing,
+    /// so the row does not say up to date while the footnote shows the error.
+    enum SettledState: Equatable, Sendable {
+        case syncing
+        case error
+        case upToDate
+    }
+
+    static func settledState(
+        hasVisibleIssue: Bool,
+        fetchFailed: Bool,
+        sendFailed: Bool,
+        zoneIsSaved: Bool,
+        engineIsRunning: Bool
+    ) -> SettledState {
+        if hasVisibleIssue { return .error }
+        if fetchFailed || sendFailed || !engineIsRunning || !zoneIsSaved { return .syncing }
+        return .upToDate
+    }
+
+    /// A definite account answer replaces the "couldn't check" error. Sync errors stay.
+    static func lastErrorSummary(isAccountDefinite: Bool, previous: String?, accountCheckMessage: String) -> String? {
+        guard isAccountDefinite, previous == accountCheckMessage else { return previous }
+        return nil
     }
 
     /// Whether a finished fetch or send stored something. A fetch that completes before
@@ -69,14 +104,24 @@ enum CloudSyncDiagnostics {
     }
 
     /// One read-only Settings line. `lastSync` and `lastError` are already display text.
+    /// Until the signature has been read, the environment is "Checking". "Unknown" means
+    /// the read finished and neither the signature nor the profile named a database.
     static func summary(
         environment: CloudSyncContainerEnvironment?,
+        environmentResolved: Bool,
         accountStatus: String,
         lastSync: String,
         lastError: String
     ) -> String {
-        let environment = environment?.rawValue ?? "Unknown"
-        return "CloudKit \(environment) · Account \(accountStatus) · Last sync \(lastSync) · Last error \(lastError)"
+        let environmentName: String
+        if let environment {
+            environmentName = environment.rawValue
+        } else if environmentResolved {
+            environmentName = "Unknown"
+        } else {
+            environmentName = "Checking"
+        }
+        return "CloudKit \(environmentName) · Account \(accountStatus) · Last sync \(lastSync) · Last error \(lastError)"
     }
 
     private static func namedEnvironment(in entitlements: [String: Any]?) -> CloudSyncContainerEnvironment? {

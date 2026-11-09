@@ -58,6 +58,7 @@ struct SettingsCloudSyncSection: View {
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("iCloud diagnostics: \(cloudSync.diagnosticsLine(relativeTo: context.date))")
         }
     }
 

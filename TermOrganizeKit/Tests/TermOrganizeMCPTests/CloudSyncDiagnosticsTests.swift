@@ -90,32 +90,70 @@ import Testing
     @Test func summaryLineNamesEnvironmentAccountSyncAndError() {
         #expect(CloudSyncDiagnostics.summary(
             environment: .development,
+            environmentResolved: true,
             accountStatus: "Available",
             lastSync: "never",
             lastError: "None"
         ) == "CloudKit Development · Account Available · Last sync never · Last error None")
         #expect(CloudSyncDiagnostics.summary(
             environment: .production,
+            environmentResolved: true,
             accountStatus: "No Account",
             lastSync: "just now",
             lastError: "You're offline. Changes will sync when you're back online."
         ) == "CloudKit Production · Account No Account · Last sync just now · Last error You're offline. Changes will sync when you're back online.")
         #expect(CloudSyncDiagnostics.summary(
             environment: nil,
+            environmentResolved: false,
+            accountStatus: "Not Checked",
+            lastSync: "never",
+            lastError: "None"
+        ) == "CloudKit Checking · Account Not Checked · Last sync never · Last error None")
+        #expect(CloudSyncDiagnostics.summary(
+            environment: nil,
+            environmentResolved: true,
             accountStatus: "Not Checked",
             lastSync: "never",
             lastError: "None"
         ) == "CloudKit Unknown · Account Not Checked · Last sync never · Last error None")
     }
 
-    @Test func indeterminateAccountChecksRetryThenStop() {
+    @Test func indeterminateAccountChecksRetryFiveTimes() {
         #expect(CloudSyncDiagnostics.retriesAccountStatus(afterAttempt: 1))
-        #expect(CloudSyncDiagnostics.retriesAccountStatus(afterAttempt: 4))
-        #expect(!CloudSyncDiagnostics.retriesAccountStatus(afterAttempt: 5))
+        #expect(CloudSyncDiagnostics.retriesAccountStatus(afterAttempt: 5))
+        #expect(!CloudSyncDiagnostics.retriesAccountStatus(afterAttempt: 6))
         #expect(CloudSyncDiagnostics.countsAsSynced(zoneIsSaved: true, failed: false, hasVisibleIssue: false))
         #expect(!CloudSyncDiagnostics.countsAsSynced(zoneIsSaved: false, failed: false, hasVisibleIssue: false))
         #expect(!CloudSyncDiagnostics.countsAsSynced(zoneIsSaved: true, failed: true, hasVisibleIssue: false))
         #expect(!CloudSyncDiagnostics.countsAsSynced(zoneIsSaved: true, failed: false, hasVisibleIssue: true))
+    }
+
+    @Test func macProfileFallsBackBesideTheExecutable() {
+        let bundle = URL(fileURLWithPath: "/Applications/Term Organize.app")
+        let fallback = CloudSyncDiagnostics.embeddedProvisioningProfileURL(resourceURL: nil, bundleURL: bundle)
+        #expect(fallback.path == "/Applications/Term Organize.app/Contents/embedded.provisionprofile")
+        let resource = URL(fileURLWithPath: "/tmp/embedded.mobileprovision")
+        #expect(CloudSyncDiagnostics.embeddedProvisioningProfileURL(resourceURL: resource, bundleURL: bundle) == resource)
+    }
+
+    @Test func retryableFailureKeepsTheRowSyncing() {
+        #expect(CloudSyncDiagnostics.settledState(
+            hasVisibleIssue: false, fetchFailed: true, sendFailed: false, zoneIsSaved: true, engineIsRunning: true
+        ) == .syncing)
+        #expect(CloudSyncDiagnostics.settledState(
+            hasVisibleIssue: false, fetchFailed: false, sendFailed: true, zoneIsSaved: true, engineIsRunning: true
+        ) == .syncing)
+        #expect(CloudSyncDiagnostics.settledState(
+            hasVisibleIssue: true, fetchFailed: true, sendFailed: false, zoneIsSaved: true, engineIsRunning: true
+        ) == .error)
+        #expect(CloudSyncDiagnostics.settledState(
+            hasVisibleIssue: false, fetchFailed: false, sendFailed: false, zoneIsSaved: true, engineIsRunning: true
+        ) == .upToDate)
+        let accountCheck = "Couldn't check your iCloud account. Sync will try again later."
+        let syncError = "Couldn't sync with iCloud. Sync will try again later."
+        #expect(CloudSyncDiagnostics.lastErrorSummary(isAccountDefinite: true, previous: accountCheck, accountCheckMessage: accountCheck) == nil)
+        #expect(CloudSyncDiagnostics.lastErrorSummary(isAccountDefinite: true, previous: syncError, accountCheckMessage: accountCheck) == syncError)
+        #expect(CloudSyncDiagnostics.lastErrorSummary(isAccountDefinite: false, previous: accountCheck, accountCheckMessage: accountCheck) == accountCheck)
     }
 
     private func profile(getTaskAllow: Bool, environment: String?) -> [String: Any] {

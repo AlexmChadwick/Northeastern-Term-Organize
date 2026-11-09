@@ -130,6 +130,7 @@ final class CloudSyncController {
 
     private func applyCloudKitEnvironment(_ environment: CloudSyncContainerEnvironment?) {
         status.cloudKitEnvironment = environment
+        status.didResolveCloudKitEnvironment = true
         logger.notice("CloudKit environment: \(environment?.rawValue ?? "unknown", privacy: .public)")
     }
 
@@ -300,12 +301,18 @@ final class CloudSyncController {
         refreshStatus()
     }
 
-    /// A definitive answer. Stops the launch retries.
+    /// A definitive answer. Stops the launch retries and drops the account-check error.
+    /// A sync error in `lastErrorSummary` is left alone.
     private func noteDefinitiveAccount(_ label: String) {
         accountStatusAttempts = 0
         accountRetryTask?.cancel()
         accountRetryTask = nil
         status.accountStatusLabel = label
+        status.lastErrorSummary = CloudSyncDiagnostics.lastErrorSummary(
+            isAccountDefinite: true,
+            previous: status.lastErrorSummary,
+            accountCheckMessage: Self.accountCheckMessage
+        )
     }
 
     /// The account check didn't get a usable answer. The status line says we'll try again;
@@ -521,7 +528,7 @@ final class CloudSyncController {
             unavailableReason = nil
             status.accountStatusLabel = "Available"
             // Starting the engine with no saved state always posts this event, and the
-            // engine drops pending changes when it does — including the zone queued above.
+            // engine drops pending changes when it does, including the zone queued above.
             if !metadata.isZoneSaved {
                 engine.state.add(pendingDatabaseChanges: [.saveZone(CloudSyncRecords.zone)])
             }
@@ -793,14 +800,25 @@ final class CloudSyncController {
             state = .unavailable(unavailableReason)
         } else if isFetching || isSending || isSyncingManually || isAwaitingFirstFetch {
             state = .syncing
-        } else if let issue = accountIssue ?? sendIssue ?? fetchIssue {
-            state = .error(issue)
-        } else if engine == nil || !metadata.isZoneSaved {
-            // Still checking the account, or the zone isn't in iCloud yet. "Up to date"
-            // before that is how an empty iCloud container used to look successful.
-            state = .syncing
         } else {
-            state = .upToDate(lastSync: metadata.lastSyncDate)
+            let visibleIssue = accountIssue ?? sendIssue ?? fetchIssue
+            switch CloudSyncDiagnostics.settledState(
+                hasVisibleIssue: visibleIssue != nil,
+                fetchFailed: fetchFailed,
+                sendFailed: sendFailed,
+                zoneIsSaved: metadata.isZoneSaved,
+                engineIsRunning: engine != nil
+            ) {
+            case .error:
+                state = .error(visibleIssue ?? "Couldn't sync with iCloud. Sync will try again later.")
+            case .syncing:
+                // Still checking the account, the zone isn't in iCloud yet, or the last
+                // pass failed and the engine will retry. "Up to date" before that is how
+                // an empty container, or a retryable error, used to look successful.
+                state = .syncing
+            case .upToDate:
+                state = .upToDate(lastSync: metadata.lastSyncDate)
+            }
         }
         if status.state != state { status.state = state }
     }

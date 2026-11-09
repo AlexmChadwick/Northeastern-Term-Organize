@@ -54,6 +54,16 @@ final class CloudSyncStatus {
     /// Whether erasing the user's data on this device also deletes it from iCloud (and so
     /// from their other devices).
     var erasesICloudData = false
+    /// Development or Production, after the signature is read. Nil when this build doesn't say.
+    var cloudKitEnvironment: CloudSyncContainerEnvironment?
+    /// False until the signature and provisioning profile have been read.
+    var didResolveCloudKitEnvironment = false
+    /// Account label for the diagnostics line. "Not Checked" until the first account lookup.
+    var accountStatusLabel = "Not Checked"
+    /// When a fetch or send last finished with the zone in place.
+    var lastSyncDate: Date?
+    /// The latest sync or account-check failure. Cleared after a sync that stored data.
+    var lastErrorSummary: String?
 
     @ObservationIgnored weak var actions: (any CloudSyncActions)?
 
@@ -65,6 +75,18 @@ final class CloudSyncStatus {
 
     func syncNow() {
         actions?.syncCloudNow()
+    }
+
+    /// Settings › iCloud. Read-only: which database this build uses, and whether sync is moving.
+    func diagnosticsLine(relativeTo now: Date = .now) -> String {
+        let lastSync = lastSyncDate.map { State.relativeLabel(for: $0, relativeTo: now) } ?? "never"
+        return CloudSyncDiagnostics.summary(
+            environment: cloudKitEnvironment,
+            environmentResolved: didResolveCloudKitEnvironment,
+            accountStatus: accountStatusLabel,
+            lastSync: lastSync,
+            lastError: lastErrorSummary ?? "None"
+        )
     }
 
     /// Whether "Sync now" can do anything.

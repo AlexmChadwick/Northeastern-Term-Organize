@@ -201,12 +201,19 @@ To enable it in your build:
    of *Signing & Capabilities*). If you change the bundle identifier, change the container in
    the entitlements file and in Info.plist's `NEUCloudKitContainerIdentifier` key together.
 3. Run the app on two devices signed in to the same Apple Account (iCloud turned on) and
-   leave **Sync with iCloud** on. Changes usually arrive within seconds; the app also checks
-   whenever it opens.
-4. Before a TestFlight or App Store release, deploy the schema to production in
-   [CloudKit Console](https://icloud.developer.apple.com) (development creates record types
-   on first save). Xcode switches `aps-environment` to production when it exports for
-   distribution.
+   leave **Sync with iCloud** on. The app checks when it opens and when it returns to the
+   foreground. Settings › iCloud shows a read-only diagnostics line: the CloudKit
+   environment (`Development` or `Production`), the account status, the last sync, and the
+   last error. Both devices have to show the same environment before they can see each
+   other's data.
+4. A build run from Xcode uses CloudKit's Development database. A distribution build
+   (Developer ID, Ad Hoc, TestFlight, or the App Store) uses Production. The checked-in
+   entitlements do not name the database. Before a Production client can save this app's
+   record types, deploy the schema from Development to Production in
+   [CloudKit Console](https://icloud.developer.apple.com). Development creates those record
+   types on first save. A generic "Couldn't sync with iCloud" message is one possible sign
+   that the schema has not been deployed. Most other CloudKit errors use that same string,
+   so it is not proof by itself. Compare the diagnostics line on both devices.
 
 A build without `NEUCloudKitContainerIdentifier`, or one whose signature lacks the iCloud
 entitlements for the container, never touches CloudKit and shows "iCloud sync isn't set up

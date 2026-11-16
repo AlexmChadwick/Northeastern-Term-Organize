@@ -141,6 +141,15 @@ struct MacDegreePlanAddCourse: View {
             } else if isSearching {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let key = CourseKey(string: trimmedText), key.number.first?.isNumber == true {
+                ContentUnavailableView {
+                    Label("\(key.description) isn’t in the catalogs on this Mac", systemImage: "magnifyingglass")
+                } description: {
+                    Text("You can still add it to \(term.name) by its code.")
+                } actions: {
+                    Button("Add \(key.description)") { addByCode(key) }
+                        .buttonStyle(.borderedProminent)
+                }
             } else {
                 ContentUnavailableView.search(text: trimmedText)
             }
@@ -253,7 +262,10 @@ struct MacDegreePlanAddCourse: View {
 
     private func addHighlighted() {
         let courses = listed
-        guard let course = courses.first(where: { $0.key == highlighted }) ?? courses.first else { return }
+        guard let course = courses.first(where: { $0.key == highlighted }) ?? courses.first else {
+            if !isSearching, let key = CourseKey(string: trimmedText), key.number.first?.isNumber == true { addByCode(key) }
+            return
+        }
         add(course)
     }
 
@@ -261,6 +273,13 @@ struct MacDegreePlanAddCourse: View {
         guard term != nil else { return }
         let entry = MacDegreePlanEditor.newCourse(from: course)
         editor.perform("Add \(course.key)") { DegreePlanEditing.add(entry, toTerm: termID, in: &$0) }
+    }
+
+    /// Adds a course by its code when no catalog on this Mac lists it.
+    private func addByCode(_ key: CourseKey) {
+        guard term != nil else { return }
+        let entry = DegreePlanCourse(key: key, title: key.description, credits: 4)
+        editor.perform("Add \(key.description)") { DegreePlanEditing.add(entry, toTerm: termID, in: &$0) }
     }
 
     // MARK: Search
@@ -289,6 +308,21 @@ struct MacDegreePlanAddCourse: View {
             results = response.results
         } else {
             results = []
+        }
+        // Stopgap: a course not offered in the searched term (say CS 3520 in Spring) still
+        // shows up when another catalog on this Mac lists it.
+        if results.isEmpty {
+            let searched = searchIndex?.term.code
+            for other in catalog.degreePlanSnapshot().indexes where other.term.code != searched {
+                let response = await Task.detached(priority: .userInitiated) {
+                    SearchEngine.search(SearchQuery(text: query), in: other)
+                }.value
+                guard !Task.isCancelled else { return }
+                if !response.results.isEmpty {
+                    results = response.results
+                    break
+                }
+            }
         }
         highlighted = results.first?.course.key
         isSearching = false

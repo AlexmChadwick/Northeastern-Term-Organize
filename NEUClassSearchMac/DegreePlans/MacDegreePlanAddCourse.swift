@@ -38,8 +38,11 @@ struct MacDegreePlanAddCourse: View {
     private var term: DegreePlanTerm? { plan?.terms.first { $0.id == termID } }
     private var trimmedText: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// The catalog searched: the selected term's, else the newest one on this Mac.
-    private var searchIndex: CatalogIndex? { catalog.readyIndex ?? catalog.degreePlanSnapshot().reference }
+    /// The semester's own catalog, when it is on this Mac.
+    private var termIndex: CatalogIndex? { term.flatMap { catalog.degreePlanSnapshot().index(for: $0) } }
+
+    /// The catalog behind saved and recent courses: the semester's, else the newest on this Mac.
+    private var searchIndex: CatalogIndex? { termIndex ?? catalog.degreePlanSnapshot().reference }
 
     /// The courses listed now, in order: search results, or saved and recent courses.
     private var listed: [Course] {
@@ -103,8 +106,8 @@ struct MacDegreePlanAddCourse: View {
         if let plan, let term {
             if let index = searchIndex {
                 VStack(spacing: 0) {
-                    if !term.matches(index.term) {
-                        Label("Searching the \(index.term.name) catalog. \(term.name) courses may differ once it’s posted.", systemImage: "info.circle")
+                    if termIndex == nil {
+                        Label("\(term.name) isn’t posted yet, so this searches every catalog on this Mac. Its courses may differ once it is.", systemImage: "info.circle")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -141,6 +144,15 @@ struct MacDegreePlanAddCourse: View {
             } else if isSearching {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let key = AddCourseSearch.codeKey(from: trimmedText) {
+                ContentUnavailableView {
+                    Label("\(key.description) isn’t in the catalogs on this Mac", systemImage: "magnifyingglass")
+                } description: {
+                    Text("You can still add it to \(term.name) by its code.")
+                } actions: {
+                    Button("Add \(key.description)") { addByCode(key) }
+                        .buttonStyle(.borderedProminent)
+                }
             } else {
                 ContentUnavailableView.search(text: trimmedText)
             }
@@ -253,7 +265,10 @@ struct MacDegreePlanAddCourse: View {
 
     private func addHighlighted() {
         let courses = listed
-        guard let course = courses.first(where: { $0.key == highlighted }) ?? courses.first else { return }
+        guard let course = courses.first(where: { $0.key == highlighted }) ?? courses.first else {
+            if !isSearching, let key = AddCourseSearch.codeKey(from: trimmedText) { addByCode(key) }
+            return
+        }
         add(course)
     }
 
@@ -261,6 +276,13 @@ struct MacDegreePlanAddCourse: View {
         guard term != nil else { return }
         let entry = MacDegreePlanEditor.newCourse(from: course)
         editor.perform("Add \(course.key)") { DegreePlanEditing.add(entry, toTerm: termID, in: &$0) }
+    }
+
+    /// Adds a course by its code when no catalog on this Mac lists it.
+    private func addByCode(_ key: CourseKey) {
+        guard term != nil else { return }
+        let entry = DegreePlanCourse(key: key, title: key.description, credits: AddCourseSearch.byCodeCredits)
+        editor.perform("Add \(key.description)") { DegreePlanEditing.add(entry, toTerm: termID, in: &$0) }
     }
 
     // MARK: Search
@@ -277,19 +299,10 @@ struct MacDegreePlanAddCourse: View {
         try? await Task.sleep(for: .milliseconds(180))
         guard !Task.isCancelled else { return }
 
-        if catalog.readyIndex != nil {
-            let response = await catalog.search(SearchQuery(text: query))
-            guard !Task.isCancelled else { return }
-            results = response.results
-        } else if let index = catalog.degreePlanSnapshot().reference {
-            let response = await Task.detached(priority: .userInitiated) {
-                SearchEngine.search(SearchQuery(text: query), in: index)
-            }.value
-            guard !Task.isCancelled else { return }
-            results = response.results
-        } else {
-            results = []
-        }
+        guard let term else { return }
+        let found = await catalog.degreePlanSnapshot().searchForAdding(SearchQuery(text: query), semester: term)
+        guard !Task.isCancelled else { return }
+        results = found.results
         highlighted = results.first?.course.key
         isSearching = false
     }

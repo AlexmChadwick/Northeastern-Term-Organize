@@ -28,8 +28,11 @@ struct DegreePlanAddCourseSheet: View {
     private var term: DegreePlanTerm? { plan?.terms.first { $0.id == termID } }
     private var trimmedText: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// The catalog searched: the selected term's, else the newest one on the device.
-    private var searchIndex: CatalogIndex? { catalog.readyIndex ?? catalog.degreePlanSnapshot().reference }
+    /// The semester's own catalog, when it is on the device.
+    private var termIndex: CatalogIndex? { term.flatMap { catalog.degreePlanSnapshot().index(for: $0) } }
+
+    /// The catalog behind saved and recent courses: the semester's, else the newest on the device.
+    private var searchIndex: CatalogIndex? { termIndex ?? catalog.degreePlanSnapshot().reference }
 
     var body: some View {
         NavigationStack {
@@ -38,6 +41,7 @@ struct DegreePlanAddCourseSheet: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .navigationSubtitle(term.map { "\($0.name) · \($0.degreePlanSummaryLine)" } ?? "")
                 .searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: "Course code or title")
+                .onSubmit(of: .search, addByCodeIfUnlisted)
                 .autocorrectionDisabled()
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
@@ -58,9 +62,9 @@ struct DegreePlanAddCourseSheet: View {
         if let plan, let term {
             List {
                 if let index = searchIndex {
-                    if !term.matches(index.term) {
+                    if termIndex == nil {
                         Section {
-                            Label("Searching the \(index.term.name) catalog. \(term.name) courses may differ once it’s posted.", systemImage: "info.circle")
+                            Label("\(term.name) isn’t posted yet, so this searches every catalog on this device. Its courses may differ once it is.", systemImage: "info.circle")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .listRowBackground(Color.clear)
@@ -74,6 +78,16 @@ struct DegreePlanAddCourseSheet: View {
                                 Spacer()
                                 ProgressView()
                                 Spacer()
+                            }
+                            .listRowBackground(Color.clear)
+                        } else if let key = AddCourseSearch.codeKey(from: trimmedText) {
+                            ContentUnavailableView {
+                                Label("\(key.description) isn’t in the catalogs on this device", systemImage: "magnifyingglass")
+                            } description: {
+                                Text("You can still add it to \(term.name) by its code.")
+                            } actions: {
+                                Button("Add \(key.description)") { addByCode(key) }
+                                    .buttonStyle(.borderedProminent)
                             }
                             .listRowBackground(Color.clear)
                         } else {
@@ -220,6 +234,20 @@ struct DegreePlanAddCourseSheet: View {
         haptic.fire(.success)
     }
 
+    /// Return in the search field adds the typed code when nothing in the catalogs matched it.
+    private func addByCodeIfUnlisted() {
+        guard !isSearching, results.isEmpty, let key = AddCourseSearch.codeKey(from: trimmedText) else { return }
+        addByCode(key)
+    }
+
+    /// Adds a course by its code when no catalog on this device lists it.
+    private func addByCode(_ key: CourseKey) {
+        guard term != nil else { return }
+        let entry = DegreePlanCourse(key: key, title: key.description, credits: AddCourseSearch.byCodeCredits)
+        userData.updateDegreePlan(id: planID) { DegreePlanEditing.add(entry, toTerm: termID, in: &$0) }
+        haptic.fire(.success)
+    }
+
     // MARK: Search
 
     private func runSearch() async {
@@ -233,19 +261,10 @@ struct DegreePlanAddCourseSheet: View {
         try? await Task.sleep(nanoseconds: 180_000_000)
         guard !Task.isCancelled else { return }
 
-        if catalog.readyIndex != nil {
-            let response = await catalog.search(SearchQuery(text: query))
-            guard !Task.isCancelled else { return }
-            results = response.results
-        } else if let index = catalog.degreePlanSnapshot().reference {
-            let response = await Task.detached(priority: .userInitiated) {
-                SearchEngine.search(SearchQuery(text: query), in: index)
-            }.value
-            guard !Task.isCancelled else { return }
-            results = response.results
-        } else {
-            results = []
-        }
+        guard let term else { return }
+        let found = await catalog.degreePlanSnapshot().searchForAdding(SearchQuery(text: query), semester: term)
+        guard !Task.isCancelled else { return }
+        results = found.results
         isSearching = false
     }
 }

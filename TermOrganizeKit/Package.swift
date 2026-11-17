@@ -25,6 +25,7 @@ let package = Package(
             sources: [
                 "Core",
                 "MCP",
+                "Logic/DegreePlan/AddCourseSearch.swift",
                 "Logic/DegreePlan/DegreeCourseRepeats.swift",
                 "Logic/DegreePlan/DegreePlanFormat.swift",
                 "Logic/DegreePlan/DegreePlanLogic.swift",

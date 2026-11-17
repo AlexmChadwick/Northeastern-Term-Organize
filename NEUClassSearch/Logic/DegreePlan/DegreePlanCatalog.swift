@@ -76,6 +76,22 @@ struct DegreePlanCatalogSnapshot {
         return matches.first { PlanSeason(termSeason: $0.season) == semester.season } ?? matches.first
     }
 
+    /// The loaded catalog of the semester's own Banner term, if it is on the device.
+    func index(for semester: DegreePlanTerm) -> CatalogIndex? {
+        bannerTerm(for: semester).flatMap { index(for: $0.code) }
+    }
+
+    /// Searches for courses to add to a semester: its own term's catalog when loaded, else
+    /// every loaded catalog merged, newest first. `isMerged` is true for the second case.
+    func searchForAdding(_ query: SearchQuery, semester: DegreePlanTerm) async -> (results: [SearchResult], isMerged: Bool) {
+        let own = index(for: semester)
+        let searched = own.map { [$0] } ?? indexes
+        let lists = await Task.detached(priority: .userInitiated) {
+            searched.map { SearchEngine.search(query, in: $0).results }
+        }.value
+        return (own == nil ? AddCourseSearch.merge(lists) : lists.first ?? [], own == nil)
+    }
+
     /// The term whose course page should open for a course: the semester's own term when
     /// its catalog is on the device, else the selected term, else the newest catalog that
     /// has the course.

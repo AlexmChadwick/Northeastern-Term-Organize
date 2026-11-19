@@ -7,6 +7,16 @@ redesigned for iOS 26 and macOS 26 with Liquid Glass.
 
 > Not affiliated with, endorsed by, or sponsored by Northeastern University or Sandbox.
 
+## Platforms and status
+
+Term Organize is an unofficial project and is not affiliated with Northeastern University.
+
+- **macOS / iOS (Swift reference):** [AlexmChadwick/Northeastern-Term-Organize](https://github.com/AlexmChadwick/Northeastern-Term-Organize) (this repository) - Mac app released, latest v1.1.3 at [github.com/AlexmChadwick/Northeastern-Term-Organize/releases](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases). iPhone and iPad builds are sideload only (test builds only, not on the App Store or TestFlight).
+- **Web:** [AlexmChadwick/term-organize-web](https://github.com/AlexmChadwick/term-organize-web) - port in development, test builds only, not in any store.
+- **Android:** [AlexmChadwick/term-organize-android](https://github.com/AlexmChadwick/term-organize-android) - port in development, test builds only, not in any store.
+- **Linux:** [AlexmChadwick/term-organize-linux](https://github.com/AlexmChadwick/term-organize-linux) - port in development, test builds only, not in any store.
+- **Windows:** [AlexmChadwick/term-organize-windows](https://github.com/AlexmChadwick/term-organize-windows) - port in development, test builds only, not in any store.
+
 ## Install
 
 Term Organize is an early beta. It is unofficial and not affiliated with Northeastern University.

@@ -529,3 +529,19 @@ struct SchedulePlanActionsTests {
         #expect(merged.terms.flatMap(\.courses).allSatisfy { $0.key == key && $0.crn == nil })
     }
 }
+
+struct ScheduleExportNameTests {
+    @Test func calendarNameUsesPlainHyphen() {
+        let name = ScheduleExporter.calendarName(plan: "Primary", term: "Fall 2026")
+        #expect(name == "Primary - Fall 2026")
+        #expect(!name.contains("\u{2013}"))
+        #expect(ScheduleExporter.fileName(name, extension: "ics") == "Primary - Fall 2026.ics")
+    }
+
+    @Test(arguments: ["", "   ", " \t\n "])
+    func blankPlanNameFallsBackToTermAlone(plan: String) {
+        let name = ScheduleExporter.calendarName(plan: plan, term: "Fall 2026")
+        #expect(name == "Fall 2026")
+        #expect(ScheduleExporter.fileName(name, extension: "ics") == "Fall 2026.ics")
+    }
+}

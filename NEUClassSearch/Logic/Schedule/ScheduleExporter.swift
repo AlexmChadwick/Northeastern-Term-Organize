@@ -223,11 +223,16 @@ enum ScheduleExporter {
     static func writeICS(for plan: SchedulePlan, index: CatalogIndex) throws -> URL {
         let (events, _) = events(for: plan, index: index)
         guard !events.isEmpty else { throw ScheduleExportError.nothingToExport }
-        let name = "\(plan.name) – \(index.term.name)"
+        let name = calendarName(plan: plan.name, term: index.term.name)
         let text = icsString(events: events, calendarName: name)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName(name, extension: "ics"))
         try text.write(to: url, atomically: true, encoding: .utf8)
         return url
+    }
+
+    /// `Plan - Term` with a plain hyphen, or the term alone when the plan name is blank.
+    static func calendarName(plan: String, term: String) -> String {
+        plan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? term : "\(plan) - \(term)"
     }
 
     static func fileName(_ name: String, extension ext: String) -> String {

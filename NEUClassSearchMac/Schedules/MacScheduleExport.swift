@@ -175,7 +175,7 @@ struct MacScheduleExportSheet: View {
                     }
                     exportFile = MacScheduleExportDocument(data: data)
                     exportType = MacScheduleExportDocument.calendarType
-                    exportName = Self.baseName("\(plan.name) – \(index.term.name)", extension: "ics")
+                    exportName = Self.baseName(ScheduleExporter.calendarName(plan: plan.name, term: index.term.name), extension: "ics")
                     isExporting = true
                 }
                 if let shareURL {

@@ -33,6 +33,8 @@ enum CatalogArchive {
     }
 
     static func encode(_ catalog: TermCatalog) throws -> Data {
+        var catalog = catalog
+        scrubInstructorEmails(in: &catalog)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         let json = try encoder.encode(catalog)
@@ -48,19 +50,32 @@ enum CatalogArchive {
     }
 
     static func decode(_ data: Data) throws -> TermCatalog {
-        let json: Data
-        if data.first == UInt8(ascii: "{") {
-            json = data
-        } else {
-            #if canImport(Compression)
-            json = try (data as NSData).decompressed(using: .lzfse) as Data
-            #else
-            json = try decompressLZFSE(data)
-            #endif
-        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
-        return try decoder.decode(TermCatalog.self, from: json)
+        var catalog = try decoder.decode(TermCatalog.self, from: jsonData(data))
+        scrubInstructorEmails(in: &catalog)
+        return catalog
+    }
+
+    static func jsonData(_ data: Data) throws -> Data {
+        if data.first == UInt8(ascii: "{") {
+            return data
+        }
+        #if canImport(Compression)
+        return try (data as NSData).decompressed(using: .lzfse) as Data
+        #else
+        return try decompressLZFSE(data)
+        #endif
+    }
+
+    private static func scrubInstructorEmails(in catalog: inout TermCatalog) {
+        for section in catalog.sections.indices {
+            guard var instructors = catalog.sections[section].instructors else { continue }
+            for index in instructors.indices {
+                instructors[index].email = InstructorEmail.institutional(instructors[index].email, trackDrops: false)
+            }
+            catalog.sections[section].instructors = instructors
+        }
     }
 
     static func read(from url: URL) throws -> TermCatalog {

@@ -200,11 +200,11 @@ enum InstructorEmail {
     /// them, and is dropped when none remain. Subdomains (including `husky.neu.edu`)
     /// are not kept. Domain matching is case-insensitive; the local part is left
     /// as Banner wrote it.
-    static func institutional(_ raw: String?) -> String? {
+    static func institutional(_ raw: String?, trackDrops: Bool = true) -> String? {
         guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
         let found = addresses(in: trimmed)
         if found.isEmpty {
-            recordDrop(trimmed)
+            if trackDrops { recordDrop(trimmed) }
             return nil
         }
         var kept: [String] = []
@@ -212,7 +212,7 @@ enum InstructorEmail {
             let domain = String(address[address.index(after: address.lastIndex(of: "@")!)...]).lowercased()
             if domain == "northeastern.edu" || domain == "neu.edu" {
                 kept.append(address)
-            } else {
+            } else if trackDrops {
                 recordDrop(address, domain: domain)
             }
         }
@@ -223,7 +223,7 @@ enum InstructorEmail {
     /// Email addresses in `text`, in order. A display name around an address
     /// (`Ada Lovelace <ada@northeastern.edu>`) is not itself an address.
     private static func addresses(in text: String) -> [String] {
-        text.matches(of: #/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/#).map { String($0.output) }
+        text.matches(of: #/[A-Za-z0-9._%+-]+@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+/#).map { String($0.output) }
     }
 
     private static func recordDrop(_ email: String, domain: String? = nil) {

@@ -7,9 +7,15 @@ redesigned for iOS 26 and macOS 26 with Liquid Glass.
 
 > Not affiliated with, endorsed by, or sponsored by Northeastern University or Sandbox.
 
-## Install
+## Platforms and status
 
-Term Organize is an early beta. It is unofficial and not affiliated with Northeastern University.
+- **macOS / iOS (Swift reference):** [AlexmChadwick/Northeastern-Term-Organize](https://github.com/AlexmChadwick/Northeastern-Term-Organize) (this repository) - Mac app released, latest v1.1.3 at [github.com/AlexmChadwick/Northeastern-Term-Organize/releases](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases). iPhone and iPad builds are sideload only (test builds only, not on the App Store or TestFlight).
+- **Web:** [AlexmChadwick/term-organize-web](https://github.com/AlexmChadwick/term-organize-web) - port in development, with no published release or store listing.
+- **Android:** [AlexmChadwick/term-organize-android](https://github.com/AlexmChadwick/term-organize-android) - port in development, with no published release or store listing.
+- **Linux:** [AlexmChadwick/term-organize-linux](https://github.com/AlexmChadwick/term-organize-linux) - port in development, with no published release or store listing.
+- **Windows:** [AlexmChadwick/term-organize-windows](https://github.com/AlexmChadwick/term-organize-windows) - port in development, with no published release or store listing.
+
+## Install
 
 ### Mac
 
@@ -28,7 +34,7 @@ Term Organize is not on the App Store or TestFlight yet. You can sideload it by 
 
 ### Build from source (Mac)
 
-Open `NEUClassSearch.xcodeproj` in Xcode, pick the `NEUClassSearch` scheme and My Mac, and press Run.
+Open `NEUClassSearch.xcodeproj` in Xcode, pick the `NEUClassSearchMac` scheme and My Mac, and press Run.
 
 ## Highlights
 
@@ -40,8 +46,8 @@ Open `NEUClassSearch.xcodeproj` in Xcode, pick the `NEUClassSearch` scheme and M
   every section with instructors, meeting times, locations, seats and waitlists, refreshed
   live from Northeastern's registration system.
 - **Schedule builder** — collect courses into plans, pick sections on a week calendar with
-  conflict detection, or generate every conflict-free schedule with constraints (start/end
-  times, free days, campus, seats…). Export to Calendar or `.ics`, share as an image, copy
+  conflict detection, or generate ranked conflict-free schedules that match your
+  constraints (start/end times, free days, campus, seats…). Export to Calendar or `.ics`, share as an image, copy
   CRNs for registration.
 - **Degree plans** — import the PDF from the degree audit planner's *View Plan* (or open it
   from Files/Mail with “Open in Term Organize”), see every semester with prerequisite
@@ -122,14 +128,12 @@ Mac way:
 ## Runs fully on device
 
 There is no backend. The app ships with compressed snapshots of the Fall 2026 and Spring 2027
-catalogs (`NEUClassSearch/Resources/Catalog/term-202710.catalog`, ~0.9 MB, 3,103 courses /
-8,472 sections, and `term-202730.catalog`, ~0.8 MB, 3,076 courses / 8,326 sections) so it
-works offline instantly. With no term chosen yet, it opens the newest bundled term. When
+catalogs for offline use. With no term chosen yet, it opens the newest bundled term. When
 online it talks **directly** to Northeastern's public Banner class search
 (`nubanner.neu.edu`) to:
 
-- refresh seats for a course when you open it (2 requests),
-- download a whole term's sections (≈20 requests) — for a term that isn't bundled yet,
+- refresh seats for a course when you open it,
+- download sections for a term that isn't bundled yet,
 - lazily fetch descriptions, requisites and instructors for courses that aren't in the
   snapshot,
 - look up the catalog entry (prerequisites, credits) of a course that isn't offered this term,
@@ -241,7 +245,7 @@ and the `NEUClassSearchWidgets` extension, and change the bundle identifiers / a
 and `Shared/WidgetScheduleData.swift`) if needed.
 
 For the Mac, choose the **NEUClassSearchMac** scheme. To build it without a development
-team (no iCloud or push; everything else works), sign it to run locally with the sandbox
+team, sign it locally with the sandbox
 entitlements in `NEUClassSearchMac/NEUClassSearchMac-Local.entitlements`:
 
 ```bash
@@ -253,8 +257,7 @@ xcodebuild -project NEUClassSearch.xcodeproj -scheme NEUClassSearchMac -configur
 `term-organize-mcp` is a local stdio server for the two catalogs bundled with the app
 (Fall 2026 `202710` and Spring 2027 `202730`) and for the degree plans stored in
 `UserData.json`. Schedules are listed separately and are not what the write tools edit.
-It does not use the network. It is unofficial and not affiliated with
-Northeastern University. Tool names, JSON shapes, the plan file, and the read-only
+It does not use the network. Tool names, JSON shapes, the plan file, and the read-only
 switch are in [`docs/MCP.md`](docs/MCP.md).
 
 Build it with Swift 6.2 or newer (the package declares a macOS 26 deployment target):

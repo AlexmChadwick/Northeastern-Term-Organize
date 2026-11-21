@@ -193,41 +193,73 @@ enum InstructorEmail {
         return droppedDomainCounts
     }
 
-    /// Addresses whose domain is exactly `northeastern.edu` or `neu.edu`.
+    /// Mailboxes whose whole domain is exactly `northeastern.edu` or `neu.edu`.
     /// Banner sometimes puts two addresses in one field, separated by a space
     /// (`person@gmail.com person@northeastern.edu`). Each address is judged on its
     /// own; the field keeps only the institutional ones, in the order Banner listed
-    /// them, and is dropped when none remain. Subdomains (including `husky.neu.edu`)
-    /// are not kept. Domain matching is case-insensitive; the local part is left
-    /// as Banner wrote it.
-    static func institutional(_ raw: String?) -> String? {
+    /// them, and is dropped when none remain. Subdomains (including `husky.neu.edu`),
+    /// a trailing dot, and non-ASCII characters in the domain are not kept. Domain
+    /// matching is ASCII case-insensitive; the full local part is left as Banner wrote it.
+    static func institutional(_ raw: String?, trackDrops: Bool = true) -> String? {
         guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
-        let found = addresses(in: trimmed)
-        if found.isEmpty {
-            recordDrop(trimmed)
+        let candidates = mailboxCandidates(in: trimmed)
+        if candidates.isEmpty {
+            if trackDrops { recordDrop(trimmed) }
             return nil
         }
         var kept: [String] = []
-        for address in found {
-            let domain = String(address[address.index(after: address.lastIndex(of: "@")!)...]).lowercased()
-            if domain == "northeastern.edu" || domain == "neu.edu" {
-                kept.append(address)
-            } else {
-                recordDrop(address, domain: domain)
+        for candidate in candidates {
+            if isInstitutional(candidate) {
+                kept.append(candidate)
+            } else if trackDrops {
+                recordDrop(candidate)
             }
         }
         guard !kept.isEmpty else { return nil }
         return kept.joined(separator: " ")
     }
 
-    /// Email addresses in `text`, in order. A display name around an address
-    /// (`Ada Lovelace <ada@northeastern.edu>`) is not itself an address.
-    private static func addresses(in text: String) -> [String] {
-        text.matches(of: #/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/#).map { String($0.output) }
+    private static let allowedDomains: Set<String> = ["northeastern.edu", "neu.edu"]
+    private static let localPartSymbols = Set("!#$%&'*+/=?^_`{|}~-".unicodeScalars)
+
+    /// Every whitespace, comma or semicolon separated token that contains an `@`,
+    /// unwrapped from one pair of `<>`. Tokens without an `@` (a display name) are skipped.
+    /// A token is never cut short, so `ada@northeastern.edu.` stays whole and gets rejected.
+    private static func mailboxCandidates(in text: String) -> [String] {
+        var result: [String] = []
+        for piece in text.split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == ";" }) {
+            var token = String(piece)
+            if token.count >= 2, token.hasPrefix("<"), token.hasSuffix(">") {
+                token = String(token.dropFirst().dropLast())
+            }
+            if token.contains("@") { result.append(token) }
+        }
+        return result
     }
 
-    private static func recordDrop(_ email: String, domain: String? = nil) {
-        let host = domain ?? email.split(separator: "@").last.map { String($0).lowercased() } ?? "(invalid)"
+    /// True when `candidate` is one complete `local@domain` mailbox with a valid
+    /// ASCII local part and a domain equal to an allowed domain after ASCII case folding.
+    private static func isInstitutional(_ candidate: String) -> Bool {
+        let parts = candidate.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty else { return false }
+        let local = String(parts[0])
+        let domain = String(parts[1])
+        guard local.unicodeScalars.allSatisfy(isLocalPartScalar) else { return false }
+        guard !local.hasPrefix("."), !local.hasSuffix("."), !local.contains("..") else { return false }
+        guard domain.unicodeScalars.allSatisfy({ $0.isASCII }) else { return false }
+        return allowedDomains.contains(domain.lowercased())
+    }
+
+    private static func isLocalPartScalar(_ scalar: Unicode.Scalar) -> Bool {
+        guard scalar.isASCII else { return false }
+        if scalar == "." || localPartSymbols.contains(scalar) { return true }
+        return (scalar.value >= 48 && scalar.value <= 57)
+            || (scalar.value >= 65 && scalar.value <= 90)
+            || (scalar.value >= 97 && scalar.value <= 122)
+    }
+
+    private static func recordDrop(_ email: String) {
+        let host = email.split(separator: "@").last.map { String($0).lowercased() } ?? "(invalid)"
         lock.lock()
         droppedOccurrences += 1
         droppedUnique.insert(email.lowercased())

@@ -97,6 +97,90 @@ struct CoreModelTests {
         #expect(faculty("a@northeastern.edu b@neu.edu").toInstructor()?.email == "a@northeastern.edu b@neu.edu")
     }
 
+    /// The allowed domains must match whole. A prefix of a longer domain is not enough,
+    /// and the local part is kept complete, punctuation included.
+    @Test func instructorEmailsRequireTheWholeDomain() {
+        func kept(_ raw: String) -> String? { InstructorEmail.institutional(raw, trackDrops: false) }
+        #expect(kept("x@northeastern.edu.") == nil)
+        #expect(kept("x@neu.edu.") == nil)
+        #expect(kept("x@northeastern.eduX") == nil)
+        #expect(kept("x@neu.edu\u{00E9}") == nil)
+        #expect(kept("x@northeastern.edu.evil.com") == nil)
+        #expect(kept("x@northeastern.edu-evil.com") == nil)
+        #expect(kept("x@northeastern.edu@evil.com") == nil)
+        #expect(kept("x@northea\u{017F}tern.edu") == nil)
+        // A dropped candidate does not hide a good one beside it.
+        #expect(kept("x@northeastern.edu. y@neu.edu") == "y@neu.edu")
+        #expect(kept("x@neu.edu y@neu.edu.") == "x@neu.edu")
+        // Local parts with punctuation are kept whole.
+        #expect(kept("ada!x@northeastern.edu") == "ada!x@northeastern.edu")
+        #expect(kept("o'brien+tag@NEU.EDU") == "o'brien+tag@NEU.EDU")
+        #expect(kept("a#b$c%d&e*f/g=h?i^j`k{l|m}n~o_p-q.r@neu.edu") == "a#b$c%d&e*f/g=h?i^j`k{l|m}n~o_p-q.r@neu.edu")
+        #expect(kept("<ada!x@neu.edu>") == "ada!x@neu.edu")
+        #expect(kept("Ada Lovelace <ada@northeastern.edu>, b@gmail.com; c@neu.edu") == "ada@northeastern.edu c@neu.edu")
+        // Malformed local parts are dropped rather than trimmed to something valid.
+        #expect(kept("@neu.edu") == nil)
+        #expect(kept(".x@neu.edu") == nil)
+        #expect(kept("x.@neu.edu") == nil)
+        #expect(kept("x..y@neu.edu") == nil)
+        #expect(kept("x\u{00E9}@neu.edu") == nil)
+        #expect(kept("(x)@neu.edu") == nil)
+    }
+
+    /// Archive load scrubs a file that still carries unsafe addresses, and save writes none.
+    @Test func catalogArchiveLoadAndSaveKeepOnlyWholeInstitutionalMailboxes() throws {
+        let raw = [
+            "x@northeastern.edu.", "x@neu.eduX", "x@husky.neu.edu", "x@gmail.com",
+            "ada!x@northeastern.edu", "Y@NEU.EDU", "z@neu.edu\u{00E9}",
+        ]
+        let expected: [String?] = [nil, nil, nil, nil, "ada!x@northeastern.edu", "Y@NEU.EDU", nil]
+        let catalog = Self.catalog(emails: raw)
+
+        // Load: the file on disk has not been through the encoder's scrub.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let unscrubbed = try encoder.encode(catalog)
+        #expect(String(decoding: unscrubbed, as: UTF8.self).contains("x@northeastern.edu."))
+        let loaded = try CatalogArchive.decode(unscrubbed)
+        #expect(Self.emails(in: loaded) == expected)
+
+        // Save: the written bytes, read back without the runtime scrub, hold only kept mailboxes.
+        let saved = try CatalogArchive.encode(catalog)
+        let savedJSON = try CatalogArchive.jsonData(saved)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let onDisk = try decoder.decode(TermCatalog.self, from: savedJSON)
+        #expect(Self.emails(in: onDisk) == expected)
+        let text = String(decoding: savedJSON, as: UTF8.self)
+        #expect(!text.contains("x@northeastern.edu."))
+        #expect(!text.contains("husky.neu.edu"))
+        #expect(!text.contains("gmail.com"))
+        #expect(text.contains("ada!x@northeastern.edu"))
+    }
+
+    private static func emails(in catalog: TermCatalog) -> [String?] {
+        catalog.sections.map { $0.instructors?.first?.email }
+    }
+
+    private static func catalog(emails: [String]) -> TermCatalog {
+        let sections = emails.enumerated().map { offset, email in
+            CourseSection(
+                crn: "\(1000 + offset)", subject: "CS", number: "3000", title: "Algorithms",
+                sectionNumber: "01", partOfTerm: "1",
+                seatCapacity: 40, seatsRemaining: 3, enrollment: 37,
+                waitlistCapacity: 0, waitlistCount: 0, waitlistRemaining: 0,
+                classType: "Lecture", honors: false, campus: "Boston",
+                instructionMethod: "Traditional", meetings: [],
+                instructors: [Instructor(name: "Lovelace, Ada", primary: true, email: email)],
+                crossListCRNs: [], attributes: [], description: nil, prereqs: nil, coreqs: nil
+            )
+        }
+        return TermCatalog(
+            term: Term(code: "202710", bannerDescription: "Fall 2026 Semester"),
+            courses: [], sections: sections, subjects: [], attributes: [], campuses: []
+        )
+    }
+
     @Test func catalogArchiveRoundTrip() throws {
         let term = Term(code: "202710", bannerDescription: "Fall 2026 Semester")
         let course = Course(subject: "CS", number: "3000", title: "Algorithms and Data", description: "Introduces…",

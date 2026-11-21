@@ -25,41 +25,63 @@ struct SearchEngineTests {
         return SearchEngine.search(SearchQuery(text: text, filters: filters), in: index).results.prefix(5).map(\.course.code)
     }
 
-    /// Every address stored in the bundled Spring 2027 snapshot is on
-    /// `northeastern.edu` or `neu.edu`. A field that listed a personal address
-    /// beside an institutional one must not keep the personal one.
-    @Test func bundledSpring2027EmailsAreInstitutional() throws {
-        let url = try #require(
-            AppPaths.bundledCatalogURLs.first { $0.lastPathComponent == "term-202730.catalog" },
-            "Bundled Spring 2027 catalog missing"
-        )
-        let catalog = try CatalogArchive.read(from: url)
-        let address = #/[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/#
-        var checked = 0
-        func check(_ text: String, crn: String) {
-            let matches = text.matches(of: address)
-            for match in matches {
-                checked += 1
-                let domain = String(match.output.1).lowercased()
-                #expect(domain == "northeastern.edu" || domain == "neu.edu", "CRN \(crn) has \(domain)")
-            }
+    /// Reads each bundled file as raw JSON, without the runtime sanitizer in `CatalogArchive.decode`,
+    /// so an address that shipped in the file cannot be hidden by the loader.
+    @Test func bundledCatalogEmailsAreInstitutional() throws {
+        let urls = AppPaths.bundledCatalogURLs
+        let names = urls.map(\.lastPathComponent)
+        #expect(names.contains("term-202710.catalog"))
+        #expect(names.contains("term-202730.catalog"))
+        for url in urls {
+            let json = try CatalogArchive.jsonData(Data(contentsOf: url))
+            let root = try JSONSerialization.jsonObject(with: json)
+            var scan = RawEmailScan()
+            scan.visit(root, key: nil)
+            #expect(scan.kept > 0, "\(url.lastPathComponent): no instructor emails found")
+            #expect(scan.violations.isEmpty, "\(url.lastPathComponent): \(scan.violations.prefix(5))")
         }
-        for section in catalog.sections {
-            for instructor in section.instructors ?? [] {
-                guard let email = instructor.email else { continue }
-                let matches = email.matches(of: address)
-                #expect(!matches.isEmpty, "Unparsed instructor email on CRN \(section.crn)")
-                let leftover = email.replacing(address, with: " ")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                #expect(leftover.isEmpty, "Instructor email on CRN \(section.crn) is not only institutional addresses")
-                check(email, crn: section.crn)
-            }
-            if let description = section.description { check(description, crn: section.crn) }
+    }
+
+    @Test func rawEmailScanFlagsUnsafeFixtures() {
+        func violations(_ object: Any) -> [String] {
+            var scan = RawEmailScan()
+            scan.visit(object, key: nil)
+            return scan.violations
         }
-        for course in catalog.courses {
-            check(course.description, crn: course.code)
+        func catalog(email: String? = nil, description: String? = nil) -> [String: Any] {
+            var instructor: [String: Any] = ["name": "Lovelace, Ada"]
+            if let email { instructor["email"] = email }
+            var section: [String: Any] = ["instructors": [instructor]]
+            if let description { section["description"] = description }
+            return ["sections": [section]]
         }
-        #expect(checked > 0)
+        // Clean data passes, including an institutional address with sentence punctuation in prose.
+        #expect(violations(catalog(email: "ada@northeastern.edu Ada@NEU.EDU")).isEmpty)
+        #expect(violations(catalog(email: "ada!x@neu.edu", description: "Write to advising@northeastern.edu.")).isEmpty)
+        // Prose: exactly one sentence period is punctuation; a second one or other trailing characters are not.
+        #expect(violations(catalog(description: "Write to advising@northeastern.edu.")).isEmpty)
+        #expect(!violations(catalog(description: "Write to advising@northeastern.edu..")).isEmpty)
+        #expect(!violations(catalog(description: "Write to advising@example.com.")).isEmpty)
+        // Email field: a trailing dot is never stripped.
+        #expect(!violations(catalog(email: "advising@neu.edu.")).isEmpty)
+        // Student, subdomain and external domains.
+        #expect(!violations(catalog(email: "synthetic@husky.neu.edu")).isEmpty)
+        #expect(!violations(catalog(email: "synthetic@coe.neu.edu")).isEmpty)
+        #expect(!violations(catalog(email: "synthetic@example.com")).isEmpty)
+        #expect(!violations(catalog(email: "synthetic@example.com ada@neu.edu")).isEmpty)
+        // An allowed prefix of a longer domain, in the email field.
+        #expect(!violations(catalog(email: "synthetic@northeastern.edu.")).isEmpty)
+        #expect(!violations(catalog(email: "synthetic@neu.eduX")).isEmpty)
+        #expect(!violations(catalog(email: "synthetic@neu.edu\u{00E9}")).isEmpty)
+        // Escaped addresses, in the email field and in any other string.
+        #expect(!violations(catalog(email: "synthetic[at]example[dot]com")).isEmpty)
+        #expect(!violations(catalog(description: "mail synthetic (at) example (dot) com")).isEmpty)
+        #expect(!violations(catalog(description: "mail synthetic%40example.com")).isEmpty)
+        #expect(!violations(catalog(description: "mail synthetic&#64;example.com")).isEmpty)
+        // Literal addresses outside the email field.
+        #expect(!violations(catalog(description: "mail synthetic@husky.neu.edu today")).isEmpty)
+        #expect(!violations(catalog(description: "mail <synthetic@example.com>")).isEmpty)
+        #expect(!violations(catalog(description: "mail synthetic@example.com.")).isEmpty)
     }
 
     @Test func bundledCatalogIsComplete() throws {
@@ -159,5 +181,72 @@ struct SearchEngineTests {
             prereqs: prereqs, coreqs: coreqs, postreqs: [],
             specialTopics: false, college: nil, department: nil, detailsLoaded: detailsLoaded
         )
+    }
+}
+
+/// Walks decoded catalog JSON and collects addresses that are not complete
+/// `northeastern.edu` or `neu.edu` mailboxes. It does not share code with the
+/// runtime sanitizer, so a bug there cannot hide a bad file.
+private struct RawEmailScan {
+    var violations: [String] = []
+    /// Complete institutional mailboxes seen in `email` fields.
+    var kept = 0
+
+    private static let allowed: Set<String> = ["northeastern.edu", "neu.edu"]
+
+    mutating func visit(_ node: Any, key: String?) {
+        if let dictionary = node as? [String: Any] {
+            for (childKey, value) in dictionary { visit(value, key: childKey) }
+        } else if let array = node as? [Any] {
+            for value in array { visit(value, key: key) }
+        } else if let text = node as? String {
+            visit(string: text, isEmailField: key == "email")
+        }
+    }
+
+    private mutating func visit(string text: String, isEmailField: Bool) {
+        if hasEscapedAddress(text) { violations.append("escaped address in \(text.prefix(60))") }
+        // Whitespace, comma or semicolon separated tokens. Every token with an @ is a candidate.
+        let tokens = text.split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == ";" })
+        for piece in tokens where piece.contains("@") {
+            // In the email field the token must be a whole mailbox as written. In prose, one
+            // sentence-ending period after an address is punctuation; nothing else is stripped.
+            var token = String(piece)
+            if !isEmailField, token.hasSuffix(".") { token.removeLast() }
+            if Self.isAllowedMailbox(token) {
+                if isEmailField { kept += 1 }
+            } else {
+                violations.append("address with a domain that is not allowed: \(domain(of: token))")
+            }
+        }
+        if isEmailField, !text.contains("@"), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            violations.append("email field without an address")
+        }
+    }
+
+    private func domain(of token: String) -> String {
+        token.split(separator: "@", omittingEmptySubsequences: false).last.map(String.init) ?? ""
+    }
+
+    private static func isAllowedMailbox(_ token: String) -> Bool {
+        let parts = token.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty else { return false }
+        let localSymbols = Set("!#$%&'*+/=?^_`{|}~-.".unicodeScalars)
+        for scalar in parts[0].unicodeScalars {
+            let isAlphanumeric = (48...57).contains(scalar.value) || (65...90).contains(scalar.value) || (97...122).contains(scalar.value)
+            if !isAlphanumeric && !localSymbols.contains(scalar) { return false }
+        }
+        let domain = String(parts[1])
+        guard domain.unicodeScalars.allSatisfy({ $0.isASCII }) else { return false }
+        return allowed.contains(domain.lowercased())
+    }
+
+    /// `[at]`, `(dot)` and similar bracketed words, plus percent and HTML escapes of the at sign.
+    private func hasEscapedAddress(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        if lower.contains("%40") || lower.contains("&#64;") || lower.contains("&#x40;") || lower.contains("&commat;") {
+            return true
+        }
+        return lower.firstMatch(of: #/[\[({<]\s*(at|dot)\s*[\])}>]/#) != nil
     }
 }

@@ -36,6 +36,8 @@ struct SeatsBadge: View {
     }
 
     private var isWaitlistHold: Bool { remaining > 0 && waitlistCount > 0 }
+    /// Open means free seats and nobody waitlisted, the same rule as `CourseSection.isOpen`.
+    private var isOpen: Bool { remaining > 0 && waitlistCount == 0 }
     private var waitlistLabel: String? {
         if waitlistCapacity > 0 { return "Waitlist \(waitlistCount)/\(waitlistCapacity)" }
         return waitlistCount > 0 ? "Waitlist \(waitlistCount)" : nil
@@ -51,7 +53,7 @@ struct SeatsBadge: View {
     /// The detailed badge text. The word Waitlist appears once: in the size, never also as a status.
     var detailedText: String {
         if capacity == 0 && remaining <= 0 { return "No seat limit listed" }
-        if isWaitlistHold { return "\(remaining) of \(capacity) · \(waitlistLabel ?? "Waitlist")" }
+        if isWaitlistHold { return "0 of \(capacity) open · \(waitlistLabel ?? "Waitlist")" }
         if remaining > 0 { return "\(remaining) of \(capacity) open" }
         if let waitlistLabel { return "Full · \(waitlistLabel)" }
         return "Full"
@@ -64,7 +66,7 @@ struct SeatsBadge: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: remaining > 0 ? "chair.fill" : "chair")
+            Image(systemName: isOpen ? "chair.fill" : "chair")
                 .imageScale(.small)
             Text(style == .compact ? compactText : detailedText)
                 .monospacedDigit()
@@ -144,22 +146,60 @@ struct TagLabel: View {
     }
 }
 
+/// The color family of a seat meter or count.
+enum SeatTone: Equatable {
+    case green, orange, red
+
+    var color: Color {
+        switch self {
+        case .green: .green
+        case .orange: .orange
+        case .red: .red
+        }
+    }
+}
+
+/// How full a seat meter is (0...1) and its color, decided apart from the view so it can be tested.
+struct SeatMeterAppearance: Equatable {
+    var fill: Double
+    var tone: SeatTone
+
+    /// `remaining` is the open seat count. A waitlist hold has free seats the waitlist will take first,
+    /// so it draws a full orange bar and never a green one.
+    static func make(remaining: Int, capacity: Int, isWaitlistHold: Bool = false) -> SeatMeterAppearance {
+        if isWaitlistHold { return SeatMeterAppearance(fill: 1, tone: .orange) }
+        let used = capacity > 0 ? Double(capacity - max(0, remaining)) / Double(capacity) : 1
+        return SeatMeterAppearance(
+            fill: min(1, max(0, used)),
+            tone: Theme.seatTone(remaining: remaining, capacity: capacity)
+        )
+    }
+}
+
 /// A thin capacity bar showing how full a section is.
 struct SeatMeter: View {
     var remaining: Int
     var capacity: Int
+    var isWaitlistHold = false
 
     var body: some View {
-        let fraction = capacity > 0 ? Double(capacity - max(0, remaining)) / Double(capacity) : 1
+        let appearance = SeatMeterAppearance.make(remaining: remaining, capacity: capacity, isWaitlistHold: isWaitlistHold)
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule().fill(.quaternary)
                 Capsule()
-                    .fill(Theme.seatColor(remaining: remaining, capacity: capacity).gradient)
-                    .frame(width: max(4, proxy.size.width * min(1, max(0, fraction))))
+                    .fill(appearance.tone.color.gradient)
+                    .frame(width: max(4, proxy.size.width * appearance.fill))
             }
         }
         .frame(height: 6)
         .accessibilityHidden(true)
+    }
+}
+
+extension SeatMeter {
+    /// The meter for a section: it reads `openSeats`, so a waitlisted section is never drawn as open.
+    init(section: CourseSection) {
+        self.init(remaining: section.openSeats, capacity: section.seatCapacity, isWaitlistHold: section.isWaitlistHold)
     }
 }

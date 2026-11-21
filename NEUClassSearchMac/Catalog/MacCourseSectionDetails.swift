@@ -166,7 +166,7 @@ struct MacCourseSectionDetails: View {
                     Text("\(section.enrollment) enrolled")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
-                    SeatMeter(remaining: section.seatsRemaining, capacity: section.seatCapacity)
+                    SeatMeter(section: section)
                         .frame(width: 120)
                 }
                 if section.seatsRemaining < 0 {

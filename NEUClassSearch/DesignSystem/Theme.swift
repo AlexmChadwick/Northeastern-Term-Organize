@@ -31,14 +31,23 @@ enum Theme {
 
     /// Color describing seat availability.
     static func seatColor(remaining: Int, capacity: Int) -> Color {
+        seatTone(remaining: remaining, capacity: capacity).color
+    }
+
+    static func seatTone(remaining: Int, capacity: Int) -> SeatTone {
         guard remaining > 0 else { return .red }
         guard capacity > 0 else { return .green }
         let fraction = Double(remaining) / Double(capacity)
         return fraction <= 0.1 || remaining <= 2 ? .orange : .green
     }
 
+    /// A waitlist hold is orange whatever its seat count; otherwise the tone follows the open seats.
+    static func seatTone(for section: CourseSection) -> SeatTone {
+        section.isWaitlistHold ? .orange : seatTone(remaining: section.openSeats, capacity: section.seatCapacity)
+    }
+
     static func seatColor(for section: CourseSection) -> Color {
-        section.isWaitlistHold ? .orange : seatColor(remaining: section.seatsRemaining, capacity: section.seatCapacity)
+        seatTone(for: section).color
     }
 
     /// The fill of content cards: the grouped background on iPhone and iPad, the control

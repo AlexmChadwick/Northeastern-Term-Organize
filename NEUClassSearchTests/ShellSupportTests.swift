@@ -417,7 +417,7 @@ struct WaitlistStatusTests {
         let compact = SeatsBadge(section: hold)
         #expect(compact.compactText == "Waitlist")
         let detailed = SeatsBadge(section: hold, style: .detailed)
-        #expect(detailed.detailedText == "2 of 15 · Waitlist 7/10")
+        #expect(detailed.detailedText == "0 of 15 open · Waitlist 7/10")
         let full = SeatsBadge(section: ShellFixtures.section(seats: 0, capacity: 15, onWaitlist: 7), style: .detailed)
         #expect(full.detailedText == "Full · Waitlist 7/10")
         #expect(SeatsBadge(section: ShellFixtures.section(seats: 2, capacity: 15)).compactText == "2/15")

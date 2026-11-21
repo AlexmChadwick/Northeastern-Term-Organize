@@ -405,7 +405,13 @@ func sectionJSON(_ section: CourseSection) -> [String: Any] {
         if let hours = span.bannerDefault { payload["credit_hours"] = hours }
     }
     if section.seatCapacity > 0 || section.seatsRemaining > 0 {
-        payload["seats"] = ["remaining": section.seatsRemaining, "capacity": section.seatCapacity]
+        payload["seats"] = [
+            "remaining": section.seatsRemaining,
+            "capacity": section.seatCapacity,
+            "open": section.isOpen,
+            "waitlist_count": section.waitlistCount,
+            "waitlist_capacity": section.waitlistCapacity,
+        ] as [String: Any]
     }
     return payload
 }

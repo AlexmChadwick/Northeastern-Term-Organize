@@ -252,7 +252,7 @@ struct GeneratedSchedule: Identifiable, Sendable {
             if !preferences.isDefault {
                 points += SchedulePreferenceRules.sectionScore(for: section, intervals: own, preferences: preferences)
             }
-            let seats = max(0, section.seatsRemaining)
+            let seats = max(0, section.openSeats)
             minSeats = min(minSeats, seats)
             totalSeats += seats
             if seats == 0 { full += 1 }
@@ -576,8 +576,8 @@ enum ScheduleGenerator {
         }
         if !filters.includeHonors, section.honors { reasons |= ScheduleFilterReason.honors.bit }
         if !filters.includeOnline, section.isOnline { reasons |= ScheduleFilterReason.online.bit }
-        if filters.hideFullSections, section.seatsRemaining <= 0 { reasons |= ScheduleFilterReason.seats.bit }
-        if filters.minSeats > 0, section.seatsRemaining < filters.minSeats { reasons |= ScheduleFilterReason.seats.bit }
+        if filters.hideFullSections, !section.isOpen { reasons |= ScheduleFilterReason.seats.bit }
+        if filters.minSeats > 0, section.openSeats < filters.minSeats { reasons |= ScheduleFilterReason.seats.bit }
         if let campus = filters.campus, !section.isOnline, !hasNoCampus(section), section.campus != campus {
             reasons |= ScheduleFilterReason.campus.bit
         }
@@ -744,7 +744,7 @@ enum ScheduleGenerator {
             slotStart: slots.map(\.start),
             intervalStart: intervalStart,
             intervals: intervals,
-            seatsRemaining: sections.map { max(0, $0.seatsRemaining) },
+            seatsRemaining: sections.map { max(0, $0.openSeats) },
             sectionPoints: sectionPoints,
             weights: ScheduleScoring.Weights(preferences: preferences),
             options: ScheduleScoring.measureOptions(for: preferences)

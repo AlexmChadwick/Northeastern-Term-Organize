@@ -19,7 +19,7 @@ extension CourseSection {
     var macCatalogSortStart: Int { weeklyMeetings.compactMap(\.start).min() ?? Int.max }
     var macCatalogSortInstructor: String { courseSortedInstructors?.first?.displayName ?? "" }
     var macCatalogSortLocation: String { macCatalogLocationLabel }
-    var macCatalogSortSeats: Int { seatsRemaining }
+    var macCatalogSortSeats: Int { openSeats }
     var macCatalogSortWaitlist: Int { hasWaitlist ? waitlistRemaining : -1 }
     var macCatalogSortCourse: CourseKey { courseKey }
 
@@ -101,7 +101,7 @@ struct MacSectionSeatsLabel: View {
                 .foregroundStyle(.secondary)
         } else {
             HStack(spacing: 3) {
-                Text("\(max(0, section.seatsRemaining))")
+                Text("\(max(0, section.openSeats))")
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.seatColor(for: section))
                 Text("/ \(section.seatCapacity)")
@@ -132,6 +132,11 @@ struct MacSectionWaitlistLabel: View {
             .help("Waitlist: \(section.waitlistCount) of \(section.waitlistCapacity) spots filled")
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Waitlist: \(section.waitlistCount) of \(section.waitlistCapacity) filled")
+        } else if section.waitlistCount > 0 {
+            Text("\(section.waitlistCount)")
+                .fontWeight(.medium)
+                .monospacedDigit()
+                .help("Waitlist: \(section.waitlistCount), no capacity listed")
         } else {
             Text("–")
                 .foregroundStyle(.tertiary)

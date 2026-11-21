@@ -21,7 +21,7 @@ struct SectionSeatsSummary: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var hasSeatData: Bool { section.seatCapacity > 0 || section.seatsRemaining > 0 }
-    private var openSeats: Int { max(0, section.seatsRemaining) }
+    private var openSeats: Int { max(0, section.openSeats) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -84,6 +84,9 @@ struct SectionSeatsSummary: View {
             }
             if section.hasWaitlist {
                 Label(waitlistText, systemImage: "list.number")
+                    .foregroundStyle(.secondary)
+            } else if let label = section.waitlistLabel {
+                Label(label, systemImage: "list.number")
                     .foregroundStyle(.secondary)
             } else if section.isFull {
                 Label("No waitlist", systemImage: "list.number")

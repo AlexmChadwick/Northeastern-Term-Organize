@@ -159,7 +159,7 @@ struct MacCourseSectionDetails: View {
         VStack(alignment: .leading, spacing: 4) {
             if section.seatCapacity > 0 || section.seatsRemaining > 0 {
                 HStack(spacing: 10) {
-                    Text("\(max(0, section.seatsRemaining)) of \(section.seatCapacity) open")
+                    Text("\(max(0, section.openSeats)) of \(section.seatCapacity) open")
                         .fontWeight(.semibold)
                         .foregroundStyle(Theme.seatColor(for: section))
                         .monospacedDigit()
@@ -175,6 +175,9 @@ struct MacCourseSectionDetails: View {
                 }
                 if section.hasWaitlist {
                     Text("Waitlist: \(section.waitlistCount) of \(section.waitlistCapacity) filled · \(CourseFormat.count(max(0, section.waitlistRemaining), "spot")) open")
+                        .foregroundStyle(.secondary)
+                } else if let label = section.waitlistLabel {
+                    Text(label)
                         .foregroundStyle(.secondary)
                 } else if section.isFull {
                     Text("No waitlist")

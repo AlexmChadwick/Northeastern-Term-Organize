@@ -496,8 +496,8 @@ enum ScheduleFormat {
     }
 
     static func seatsText(_ section: CourseSection) -> String {
-        if section.seatsRemaining > 0 { return "\(section.seatsRemaining) of \(section.seatCapacity) open" }
-        if section.waitlistCapacity > 0 { return "Full · \(section.waitlistRemaining) waitlist" }
+        if section.isOpen { return "\(section.openSeats) of \(section.seatCapacity) open" }
+        if let label = section.waitlistLabel { return section.seatsRemaining > 0 ? label : "Full · \(label)" }
         return "Full"
     }
 

@@ -148,6 +148,25 @@ struct Instructor: Codable, Hashable, Sendable {
     }
 }
 
+/// An `Int` that decodes as 0 when its key is absent, for data saved before the field existed.
+@propertyWrapper
+struct ZeroIfAbsent: Codable, Hashable, Sendable {
+    var wrappedValue: Int
+
+    init(wrappedValue: Int) { self.wrappedValue = wrappedValue }
+    init(from decoder: Decoder) throws { wrappedValue = try decoder.singleValueContainer().decode(Int.self) }
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wrappedValue)
+    }
+}
+
+extension KeyedDecodingContainer {
+    func decode(_ type: ZeroIfAbsent.Type, forKey key: Key) throws -> ZeroIfAbsent {
+        try decodeIfPresent(type, forKey: key) ?? ZeroIfAbsent(wrappedValue: 0)
+    }
+}
+
 /// A single section (CRN) of a course in a term.
 struct CourseSection: Codable, Hashable, Identifiable, Sendable {
     var crn: String
@@ -162,9 +181,9 @@ struct CourseSection: Codable, Hashable, Identifiable, Sendable {
     var seatCapacity: Int
     var seatsRemaining: Int
     var enrollment: Int
-    var waitlistCapacity: Int
-    var waitlistCount: Int
-    var waitlistRemaining: Int
+    @ZeroIfAbsent var waitlistCapacity: Int
+    @ZeroIfAbsent var waitlistCount: Int
+    @ZeroIfAbsent var waitlistRemaining: Int
     /// e.g. `Lecture`, `Lab`, `Recitation/Discussion`.
     var classType: String
     var honors: Bool
@@ -204,9 +223,21 @@ struct CourseSection: Codable, Hashable, Identifiable, Sendable {
     var isVariableCredit: Bool { creditSpan?.isVariable == true }
     var courseKey: CourseKey { CourseKey(subject: subject, number: number) }
 
-    var isOpen: Bool { seatsRemaining > 0 }
+    /// Seats freed while people are waitlisted go to the waitlist first, so such a section is not open.
+    /// The one seat count to read for openness: 0 while anyone is waitlisted, else `seatsRemaining`.
+    var openSeats: Int { waitlistCount > 0 ? 0 : seatsRemaining }
+    var isOpen: Bool { openSeats > 0 }
+    /// Has free seats but a non-empty waitlist; shown as Waitlist rather than open.
+    var isWaitlistHold: Bool { seatsRemaining > 0 && waitlistCount > 0 }
     var hasWaitlist: Bool { waitlistCapacity > 0 }
-    var isFull: Bool { seatsRemaining <= 0 }
+    /// e.g. `Waitlist 7/10`, or `Waitlist 7` when Banner lists people waiting but no capacity; nil when neither.
+    var waitlistLabel: String? {
+        if hasWaitlist { return "Waitlist \(waitlistCount)/\(waitlistCapacity)" }
+        return waitlistCount > 0 ? "Waitlist \(waitlistCount)" : nil
+    }
+    var isFull: Bool { !isOpen }
+    /// `Full` with no seats, `Waitlist` with seats held for a waitlist, else `Open`. Callers that also print `waitlistLabel` must not print the status word as well.
+    var seatStatus: String { seatsRemaining <= 0 ? "Full" : (waitlistCount > 0 ? "Waitlist" : "Open") }
 
     /// Fraction of seats taken (0...1).
     var fillFraction: Double {

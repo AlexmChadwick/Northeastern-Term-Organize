@@ -291,7 +291,7 @@ struct MacSearchLanding: View {
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 if let section {
-                    Text(section.seatsRemaining > 0 ? "\(section.seatsRemaining) open" : "Full")
+                    Text(section.isOpen ? "\(section.openSeats) open" : section.seatStatus)
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Theme.seatColor(for: section))
                         .monospacedDigit()

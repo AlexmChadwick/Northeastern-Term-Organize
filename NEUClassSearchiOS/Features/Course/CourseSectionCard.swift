@@ -108,8 +108,8 @@ struct CourseSectionCard: View {
         if section.seatCapacity > 0 {
             VStack(alignment: .leading, spacing: 6) {
                 SeatMeter(remaining: section.seatsRemaining, capacity: section.seatCapacity)
-                if section.hasWaitlist {
-                    Text(section.waitlistLabel ?? "")
+                if let waitlistLabel = section.waitlistLabel {
+                    Text(waitlistLabel)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()

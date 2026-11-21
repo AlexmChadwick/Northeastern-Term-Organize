@@ -81,7 +81,7 @@ extension CourseSection {
     var courseSeatsSpoken: String {
         if seatCapacity <= 0 && seatsRemaining <= 0 { return "No seat limit listed" }
         if isWaitlistHold { return "Waitlist, \(seatsRemaining) of \(seatCapacity) seats held for the waitlist" }
-        if seatsRemaining > 0 { return "\(seatsRemaining) of \(seatCapacity) seats open" }
+        if openSeats > 0 { return "\(seatsRemaining) of \(seatCapacity) seats open" }
         if let waitlistLabel { return "Full, \(waitlistLabel)" }
         return "Full"
     }

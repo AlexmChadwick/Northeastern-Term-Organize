@@ -84,7 +84,7 @@ enum SchedulePreferenceRules {
 
     /// A section with a seat limit and no seats left. Sections Banner lists without any limit (independent study) are never full.
     static func isFull(_ section: CourseSection) -> Bool {
-        section.seatCapacity > 0 && section.seatsRemaining <= 0
+        section.seatCapacity > 0 && !section.isOpen
     }
 
     private static func overlaps(_ block: BlockedTime, _ meetings: [Meeting]) -> Bool {

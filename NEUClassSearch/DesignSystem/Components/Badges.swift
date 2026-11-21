@@ -36,7 +36,26 @@ struct SeatsBadge: View {
     }
 
     private var isWaitlistHold: Bool { remaining > 0 && waitlistCount > 0 }
-    private var waitlistLabel: String? { waitlistCapacity > 0 ? "Waitlist \(waitlistCount)/\(waitlistCapacity)" : nil }
+    private var waitlistLabel: String? {
+        if waitlistCapacity > 0 { return "Waitlist \(waitlistCount)/\(waitlistCapacity)" }
+        return waitlistCount > 0 ? "Waitlist \(waitlistCount)" : nil
+    }
+
+    /// The compact badge text; `Waitlist` alone, since the size is only in the detailed style.
+    var compactText: String {
+        if capacity == 0 && remaining <= 0 { return "No limit listed" }
+        if isWaitlistHold { return "Waitlist" }
+        return remaining > 0 ? "\(remaining)/\(capacity)" : "Full"
+    }
+
+    /// The detailed badge text. The word Waitlist appears once: in the size, never also as a status.
+    var detailedText: String {
+        if capacity == 0 && remaining <= 0 { return "No seat limit listed" }
+        if isWaitlistHold { return "\(remaining) of \(capacity) · \(waitlistLabel ?? "Waitlist")" }
+        if remaining > 0 { return "\(remaining) of \(capacity) open" }
+        if let waitlistLabel { return "Full · \(waitlistLabel)" }
+        return "Full"
+    }
 
     private var color: Color {
         if isWaitlistHold { return .orange }
@@ -47,24 +66,8 @@ struct SeatsBadge: View {
         HStack(spacing: 4) {
             Image(systemName: remaining > 0 ? "chair.fill" : "chair")
                 .imageScale(.small)
-            switch style {
-            case .compact:
-                Text(capacity == 0 && remaining <= 0 ? "No limit listed" : (isWaitlistHold ? "Waitlist" : (remaining > 0 ? "\(remaining)/\(capacity)" : "Full")))
-                    .monospacedDigit()
-            case .detailed:
-                if capacity == 0 && remaining <= 0 {
-                    // Banner lists some sections (independent study, co-op) without a seat cap.
-                    Text("No seat limit listed")
-                } else if isWaitlistHold {
-                    Text("\(remaining) of \(capacity) · \(waitlistLabel ?? "Waitlist")").monospacedDigit()
-                } else if remaining > 0 {
-                    Text("\(remaining) of \(capacity) open").monospacedDigit()
-                } else if let waitlistLabel {
-                    Text("Full · \(waitlistLabel)").monospacedDigit()
-                } else {
-                    Text("Full")
-                }
-            }
+            Text(style == .compact ? compactText : detailedText)
+                .monospacedDigit()
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(color)

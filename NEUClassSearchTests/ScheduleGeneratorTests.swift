@@ -14,14 +14,15 @@ import Testing
 struct ScheduleGeneratorTests {
     /// A section meeting on `days` (indices, 0 = Sunday) from `start` to `end` (hours).
     private func section(_ crn: String, _ subject: String, _ number: String, days: [Int], start: Double, end: Double,
-                         seats: Int = 10, honors: Bool = false, campus: String = "Boston") -> CourseSection {
+                         seats: Int = 10, honors: Bool = false, campus: String = "Boston",
+                         onWaitlist: Int = 0) -> CourseSection {
         let meeting = Meeting(days: DaySet(indices: days), start: Int(start * 60), end: Int(end * 60),
                               buildingCode: "WVH", building: "West Village H", room: "210", campusCode: "BOS",
                               kind: "Class", startDate: "2026-09-09", endDate: "2026-12-13")
         return CourseSection(crn: crn, subject: subject, number: number, title: "\(subject) \(number)", sectionNumber: "01",
                              partOfTerm: "1", seatCapacity: 40, seatsRemaining: seats, enrollment: 40 - seats,
-                             waitlistCapacity: 0, waitlistCount: 0, waitlistRemaining: 0, classType: "Lecture",
-                             honors: honors, campus: campus, instructionMethod: "Traditional", meetings: [meeting],
+                             waitlistCapacity: onWaitlist > 0 ? 10 : 0, waitlistCount: onWaitlist, waitlistRemaining: 0,
+                             classType: "Lecture", honors: honors, campus: campus, instructionMethod: "Traditional", meetings: [meeting],
                              instructors: [], crossListCRNs: [], attributes: [], description: nil, prereqs: nil, coreqs: nil)
     }
 
@@ -66,6 +67,20 @@ struct ScheduleGeneratorTests {
         filters.freeDays = [.friday]
         let result = ScheduleGenerator.generate(courses: courses, filters: filters)
         #expect(result.schedules.map(\.crns) == [["OK"]])
+    }
+
+    @Test func waitlistedSectionsAreNotOpenForHideFullOrMinSeats() {
+        let courses = [
+            course("CS", "3000", [section("QUEUE", "CS", "3000", days: [1, 3], start: 9, end: 10, seats: 5, onWaitlist: 3),
+                                  section("OPEN", "CS", "3000", days: [2, 4], start: 11, end: 12, seats: 5)]),
+        ]
+        var hide = ScheduleFilters()
+        hide.hideFullSections = true
+        #expect(ScheduleGenerator.generate(courses: courses, filters: hide).schedules.map(\.crns) == [["OPEN"]])
+        var minimum = ScheduleFilters()
+        minimum.minSeats = 1
+        #expect(ScheduleGenerator.generate(courses: courses, filters: minimum).schedules.map(\.crns) == [["OPEN"]])
+        #expect(ScheduleGenerator.generate(courses: courses, filters: ScheduleFilters()).totalFound == 2)
     }
 
     @Test func optionalCoursesFillInWhenTheyFit() {

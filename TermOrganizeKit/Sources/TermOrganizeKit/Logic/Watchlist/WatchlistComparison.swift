@@ -117,7 +117,7 @@ enum WatchlistComparison {
                 && section.waitlistRemaining > 0
 
             var next = item
-            next.lastSeatsRemaining = section.isOpen ? section.seatsRemaining : 0
+            next.lastSeatsRemaining = section.openSeats
             next.lastWaitlistRemaining = section.waitlistRemaining
             next.seatCapacity = section.seatCapacity
             next.lastCheckedAt = now
@@ -131,7 +131,7 @@ enum WatchlistComparison {
                     courseKey: item.courseKey,
                     courseTitle: item.courseTitle,
                     sectionName: sectionName(for: section),
-                    seatsRemaining: section.seatsRemaining,
+                    seatsRemaining: section.openSeats,
                     seatCapacity: section.seatCapacity,
                     waitlistRemaining: section.waitlistRemaining
                 ))

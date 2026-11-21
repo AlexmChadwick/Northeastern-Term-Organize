@@ -58,6 +58,12 @@ struct SearchEngineTests {
         // Clean data passes, including an institutional address with sentence punctuation in prose.
         #expect(violations(catalog(email: "ada@northeastern.edu Ada@NEU.EDU")).isEmpty)
         #expect(violations(catalog(email: "ada!x@neu.edu", description: "Write to advising@northeastern.edu.")).isEmpty)
+        // Prose: exactly one sentence period is punctuation; a second one or other trailing characters are not.
+        #expect(violations(catalog(description: "Write to advising@northeastern.edu.")).isEmpty)
+        #expect(!violations(catalog(description: "Write to advising@northeastern.edu..")).isEmpty)
+        #expect(!violations(catalog(description: "Write to advising@example.com.")).isEmpty)
+        // Email field: a trailing dot is never stripped.
+        #expect(!violations(catalog(email: "advising@neu.edu.")).isEmpty)
         // Student, subdomain and external domains.
         #expect(!violations(catalog(email: "synthetic@husky.neu.edu")).isEmpty)
         #expect(!violations(catalog(email: "synthetic@coe.neu.edu")).isEmpty)
@@ -187,7 +193,6 @@ private struct RawEmailScan {
     var kept = 0
 
     private static let allowed: Set<String> = ["northeastern.edu", "neu.edu"]
-    private static let punctuation = CharacterSet(charactersIn: "<>()[]{}\"'.,;:!?")
 
     mutating func visit(_ node: Any, key: String?) {
         if let dictionary = node as? [String: Any] {
@@ -204,10 +209,10 @@ private struct RawEmailScan {
         // Whitespace, comma or semicolon separated tokens. Every token with an @ is a candidate.
         let tokens = text.split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == ";" })
         for piece in tokens where piece.contains("@") {
-            // In the email field the token must be a whole mailbox as written. In prose, wrapping
-            // brackets and sentence punctuation around an address are ignored.
+            // In the email field the token must be a whole mailbox as written. In prose, one
+            // sentence-ending period after an address is punctuation; nothing else is stripped.
             var token = String(piece)
-            if !isEmailField { token = token.trimmingCharacters(in: Self.punctuation) }
+            if !isEmailField, token.hasSuffix(".") { token.removeLast() }
             if Self.isAllowedMailbox(token) {
                 if isEmailField { kept += 1 }
             } else {

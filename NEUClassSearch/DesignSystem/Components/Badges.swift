@@ -15,6 +15,7 @@ struct SeatsBadge: View {
     var capacity: Int
     var waitlistRemaining: Int = 0
     var waitlistCapacity: Int = 0
+    var waitlistCount: Int = 0
     var style: Style = .compact
 
     enum Style { case compact, detailed }
@@ -24,6 +25,7 @@ struct SeatsBadge: View {
         capacity = section.seatCapacity
         waitlistRemaining = section.waitlistRemaining
         waitlistCapacity = section.waitlistCapacity
+        waitlistCount = section.waitlistCount
         self.style = style
     }
 
@@ -33,8 +35,12 @@ struct SeatsBadge: View {
         self.style = style
     }
 
+    private var isWaitlistHold: Bool { remaining > 0 && waitlistCount > 0 }
+    private var waitlistLabel: String? { waitlistCapacity > 0 ? "Waitlist \(waitlistCount)/\(waitlistCapacity)" : nil }
+
     private var color: Color {
-        capacity == 0 && remaining <= 0 ? .secondary : Theme.seatColor(remaining: remaining, capacity: capacity)
+        if isWaitlistHold { return .orange }
+        return capacity == 0 && remaining <= 0 ? .secondary : Theme.seatColor(remaining: remaining, capacity: capacity)
     }
 
     var body: some View {
@@ -43,16 +49,18 @@ struct SeatsBadge: View {
                 .imageScale(.small)
             switch style {
             case .compact:
-                Text(capacity == 0 && remaining <= 0 ? "No limit listed" : (remaining > 0 ? "\(remaining)/\(capacity)" : "Full"))
+                Text(capacity == 0 && remaining <= 0 ? "No limit listed" : (isWaitlistHold ? "Waitlist" : (remaining > 0 ? "\(remaining)/\(capacity)" : "Full")))
                     .monospacedDigit()
             case .detailed:
                 if capacity == 0 && remaining <= 0 {
                     // Banner lists some sections (independent study, co-op) without a seat cap.
                     Text("No seat limit listed")
+                } else if isWaitlistHold {
+                    Text("\(remaining) of \(capacity) · \(waitlistLabel ?? "Waitlist")").monospacedDigit()
                 } else if remaining > 0 {
                     Text("\(remaining) of \(capacity) open").monospacedDigit()
-                } else if waitlistCapacity > 0 {
-                    Text("Full · \(waitlistRemaining) waitlist").monospacedDigit()
+                } else if let waitlistLabel {
+                    Text("Full · \(waitlistLabel)").monospacedDigit()
                 } else {
                     Text("Full")
                 }
@@ -69,8 +77,9 @@ struct SeatsBadge: View {
 
     private var accessibilityText: String {
         if capacity == 0 && remaining <= 0 { return "No seat limit listed" }
+        if isWaitlistHold { return "Waitlist, \(remaining) of \(capacity) seats held for the waitlist" }
         if remaining > 0 { return "\(remaining) of \(capacity) seats open" }
-        if waitlistCapacity > 0 { return "Full, \(waitlistRemaining) of \(waitlistCapacity) waitlist spots open" }
+        if let waitlistLabel { return "Full, \(waitlistLabel)" }
         return "Full"
     }
 }

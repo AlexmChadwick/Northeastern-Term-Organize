@@ -38,7 +38,7 @@ enum Theme {
     }
 
     static func seatColor(for section: CourseSection) -> Color {
-        seatColor(remaining: section.seatsRemaining, capacity: section.seatCapacity)
+        section.isWaitlistHold ? .orange : seatColor(remaining: section.seatsRemaining, capacity: section.seatCapacity)
     }
 
     /// The fill of content cards: the grouped background on iPhone and iPad, the control

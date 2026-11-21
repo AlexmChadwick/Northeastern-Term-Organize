@@ -109,15 +109,15 @@ enum WatchlistComparison {
                 continue
             }
 
-            let seatsOpened = item.lastSeatsRemaining <= 0 && section.seatsRemaining > 0
+            let seatsOpened = item.lastSeatsRemaining <= 0 && section.isOpen
             let waitlistOpened = item.notifyOnWaitlist
                 && !seatsOpened
-                && section.seatsRemaining <= 0
+                && !section.isOpen
                 && item.lastWaitlistRemaining <= 0
                 && section.waitlistRemaining > 0
 
             var next = item
-            next.lastSeatsRemaining = section.seatsRemaining
+            next.lastSeatsRemaining = section.isOpen ? section.seatsRemaining : 0
             next.lastWaitlistRemaining = section.waitlistRemaining
             next.seatCapacity = section.seatCapacity
             next.lastCheckedAt = now

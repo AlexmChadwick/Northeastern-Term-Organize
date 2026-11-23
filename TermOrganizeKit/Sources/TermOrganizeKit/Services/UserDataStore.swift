@@ -282,7 +282,7 @@ final class UserDataStore {
             courseKey: section.courseKey,
             courseTitle: courseTitle,
             sectionLabel: "\(section.classType) · Section \(section.sectionNumber)",
-            lastSeatsRemaining: section.seatsRemaining,
+            lastSeatsRemaining: section.openSeats,
             lastWaitlistRemaining: section.waitlistRemaining,
             seatCapacity: section.seatCapacity,
             lastCheckedAt: .now

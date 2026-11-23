@@ -31,11 +31,13 @@ private enum ShellFixtures {
         return item
     }
 
-    static func section(crn: String = "12345", seats: Int, waitlist: Int = 0, capacity: Int = 40) -> CourseSection {
+    static func section(
+        crn: String = "12345", seats: Int, waitlist: Int = 0, capacity: Int = 40, onWaitlist: Int = 0
+    ) -> CourseSection {
         CourseSection(
             crn: crn, subject: "CS", number: "3000", title: "Algorithms and Data", sectionNumber: "02",
             partOfTerm: "1", seatCapacity: capacity, seatsRemaining: seats, enrollment: capacity - seats,
-            waitlistCapacity: 10, waitlistCount: 10 - waitlist, waitlistRemaining: waitlist, classType: "Lecture",
+            waitlistCapacity: 10, waitlistCount: onWaitlist, waitlistRemaining: waitlist, classType: "Lecture",
             honors: false, campus: "Boston", instructionMethod: "Traditional", meetings: [],
             instructors: [], crossListCRNs: [], attributes: [], description: nil, prereqs: nil, coreqs: nil
         )
@@ -329,5 +331,113 @@ struct SettingsSupportTests {
     @Test func legalTextNamesTheLicenseAndWhereToReadIt() {
         #expect(LegalText.licenseURL.absoluteString == "https://www.gnu.org/licenses/agpl-3.0.html")
         #expect(LegalText.searchNEUSummary.contains("\(LegalText.platformName) adaptation of SearchNEU"))
+    }
+}
+
+// MARK: - Waitlist display
+
+struct WaitlistStatusTests {
+    @Test func noWaitlistIsOpenWithNothingNew() {
+        var s = ShellFixtures.section(seats: 5)
+        s.waitlistCapacity = 0
+        #expect(s.isOpen)
+        #expect(s.waitlistLabel == nil)
+    }
+
+    @Test func waitlistWithNoSeatsIsFullAndLabelled() {
+        let s = ShellFixtures.section(seats: 0, waitlist: 3, capacity: 15, onWaitlist: 7)
+        #expect(!s.isOpen)
+        #expect(!s.isWaitlistHold)
+        #expect(s.waitlistLabel == "Waitlist 7/10")
+    }
+
+    @Test func freedSeatsWithAWaitlistAreNotOpen() {
+        let s = ShellFixtures.section(seats: 2, onWaitlist: 7)
+        #expect(!s.isOpen)
+        #expect(s.isWaitlistHold)
+        let stats = CatalogIndex.makeStats([s])
+        #expect(stats.openSectionCount == 0)
+    }
+
+    @Test func emptyWaitlistWithSeatsIsOpen() {
+        let s = ShellFixtures.section(seats: 2, onWaitlist: 0)
+        #expect(s.isOpen)
+        #expect(!s.isWaitlistHold)
+        #expect(s.waitlistLabel == "Waitlist 0/10")
+    }
+
+    @Test func sectionsSavedWithoutWaitlistFieldsDecodeAsZero() throws {
+        let s = ShellFixtures.section(seats: 2)
+        var object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as? [String: Any])
+        for key in ["waitlistCapacity", "waitlistCount", "waitlistRemaining"] { object[key] = nil }
+        let back = try JSONDecoder().decode(CourseSection.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(back.waitlistCapacity == 0 && back.waitlistCount == 0 && back.waitlistRemaining == 0)
+    }
+
+    @Test func waitlistedSectionDoesNotRaiseASeatAlert() {
+        let item = ShellFixtures.watchItem(seats: 0)
+        let live = ["202710": [ShellFixtures.cs3000: [ShellFixtures.section(seats: 3, onWaitlist: 7)]]]
+        let result = WatchlistComparison.compare(items: [item], live: live, now: Date())
+        #expect(result.alerts.isEmpty)
+    }
+
+    // MARK: openSeats everywhere
+
+    @Test func openSeatsIsZeroBehindAQueue() {
+        #expect(ShellFixtures.section(seats: 2, onWaitlist: 7).openSeats == 0)
+        #expect(ShellFixtures.section(seats: 2, onWaitlist: 0).openSeats == 2)
+        #expect(ShellFixtures.section(seats: 2, onWaitlist: 7).isFull)
+        #expect(!ShellFixtures.section(seats: 2).isFull)
+    }
+
+    @Test func statusLabelsAreFullWaitlistOpen() {
+        #expect(ShellFixtures.section(seats: 0, onWaitlist: 7).seatStatus == "Full")
+        #expect(ShellFixtures.section(seats: 2, onWaitlist: 7).seatStatus == "Waitlist")
+        #expect(ShellFixtures.section(seats: 2).seatStatus == "Open")
+    }
+
+    @Test func queueWithNoCapacityShowsCountOnly() {
+        var s = ShellFixtures.section(seats: 2, onWaitlist: 4)
+        s.waitlistCapacity = 0
+        #expect(s.waitlistLabel == "Waitlist 4")
+        #expect(!s.isOpen)
+    }
+
+    @Test func courseAggregatesSkipQueuedSections() {
+        let queued = ShellFixtures.section(crn: "1", seats: 2, onWaitlist: 3)
+        let open = ShellFixtures.section(crn: "2", seats: 5)
+        let stats = CatalogIndex.makeStats([queued, open])
+        #expect(stats.seatsRemaining == 5)
+        #expect(stats.openSectionCount == 1)
+        #expect(CatalogIndex.makeStats([queued]).seatsRemaining == 0)
+    }
+
+    @Test func badgeTextNeverRepeatsWaitlist() {
+        let hold = ShellFixtures.section(seats: 2, capacity: 15, onWaitlist: 7)
+        let compact = SeatsBadge(section: hold)
+        #expect(compact.compactText == "Waitlist")
+        let detailed = SeatsBadge(section: hold, style: .detailed)
+        #expect(detailed.detailedText == "0 of 15 open · Waitlist 7/10")
+        let full = SeatsBadge(section: ShellFixtures.section(seats: 0, capacity: 15, onWaitlist: 7), style: .detailed)
+        #expect(full.detailedText == "Full · Waitlist 7/10")
+        #expect(SeatsBadge(section: ShellFixtures.section(seats: 2, capacity: 15)).compactText == "2/15")
+    }
+
+    @Test func planSeatsTextAndFullWarningUseOpenSeats() {
+        let hold = ShellFixtures.section(seats: 2, capacity: 15, onWaitlist: 7)
+        #expect(ScheduleFormat.seatsText(hold) == "Waitlist 7/10")
+        #expect(ScheduleFormat.seatsText(ShellFixtures.section(seats: 2)) == "2 of 40 open")
+        #expect(SchedulePreferenceRules.isFull(hold))
+    }
+
+    @Test func seatAlertFiresWhenTheQueueClears() {
+        let item = ShellFixtures.watchItem(seats: 0)
+        let queued = ["202710": [ShellFixtures.cs3000: [ShellFixtures.section(seats: 3, onWaitlist: 2)]]]
+        let after = WatchlistComparison.compare(items: [item], live: queued, now: Date())
+        #expect(after.alerts.isEmpty)
+        #expect(after.items.first?.lastSeatsRemaining == 0)
+        let cleared = ["202710": [ShellFixtures.cs3000: [ShellFixtures.section(seats: 3)]]]
+        let result = WatchlistComparison.compare(items: after.items, live: cleared, now: Date())
+        #expect(result.alerts.first?.seatsRemaining == 3)
     }
 }

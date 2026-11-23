@@ -57,7 +57,7 @@ struct MacSectionPickerSheet: View {
         var id: String { section.crn }
         var typeAndNumber: String { "\(section.classType) \(section.sectionNumber)" }
         var firstStart: Int { section.weeklyMeetings.compactMap(\.start).min() ?? Int.max }
-        var seats: Int { section.seatsRemaining }
+        var seats: Int { section.openSeats }
         var instructor: String { ScheduleFormat.instructors(of: section) ?? "" }
     }
 

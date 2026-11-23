@@ -310,7 +310,7 @@ struct CatalogIndex: Sendable {
         for s in list {
             st.sectionCount += 1
             if s.isOpen { st.openSectionCount += 1 }
-            st.seatsRemaining += max(0, s.seatsRemaining)
+            st.seatsRemaining += max(0, s.openSeats)
             st.seatCapacity += s.seatCapacity
             if s.waitlistRemaining > 0 { st.waitlistOpenCount += 1 }
             if !s.campus.isEmpty { st.campuses.insert(s.campus) }

@@ -107,9 +107,10 @@ struct CourseSectionCard: View {
     private var meterBlock: some View {
         if section.seatCapacity > 0 {
             VStack(alignment: .leading, spacing: 6) {
-                SeatMeter(remaining: section.seatsRemaining, capacity: section.seatCapacity)
-                if section.hasWaitlist {
-                    Text("Waitlist: \(section.waitlistCount) of \(section.waitlistCapacity) filled")
+                SeatMeter(section: section)
+                // The detailed badge already prints the waitlist fact unless the section is open.
+                if section.isOpen, let waitlistLabel = section.waitlistLabel {
+                    Text(waitlistLabel)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()

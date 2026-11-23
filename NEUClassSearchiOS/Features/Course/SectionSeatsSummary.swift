@@ -20,8 +20,12 @@ struct SectionSeatsSummary: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    private var hasSeatData: Bool { section.seatCapacity > 0 || section.seatsRemaining > 0 }
-    private var openSeats: Int { max(0, section.seatsRemaining) }
+    private var hasSeatData: Bool { Self.hasSeatData(section) }
+    private var openSeats: Int { Self.openCount(section) }
+
+    static func hasSeatData(_ section: CourseSection) -> Bool { section.seatCapacity > 0 || section.seatsRemaining > 0 }
+    /// The big "open" number: never counts seats held for a waitlist, never negative.
+    static func openCount(_ section: CourseSection) -> Int { max(0, section.openSeats) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -31,7 +35,7 @@ struct SectionSeatsSummary: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 if hasSeatData {
                     stats
-                    SeatMeter(remaining: section.seatsRemaining, capacity: section.seatCapacity)
+                    SeatMeter(section: section)
                     notes
                 } else {
                     Label("No seat limit is listed for this section.", systemImage: "chair")
@@ -84,6 +88,9 @@ struct SectionSeatsSummary: View {
             }
             if section.hasWaitlist {
                 Label(waitlistText, systemImage: "list.number")
+                    .foregroundStyle(.secondary)
+            } else if let label = section.waitlistLabel {
+                Label(label, systemImage: "list.number")
                     .foregroundStyle(.secondary)
             } else if section.isFull {
                 Label("No waitlist", systemImage: "list.number")

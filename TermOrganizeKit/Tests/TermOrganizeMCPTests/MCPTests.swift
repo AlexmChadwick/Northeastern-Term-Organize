@@ -104,6 +104,9 @@ struct MCPToolTests {
         #expect(meetings.first?["location"] as? String == "WVH 210")
         let seats = monday["seats"] as? [String: Any]
         #expect(seats?["remaining"] as? Int == 3)
+        #expect(seats?["open"] as? Bool == true)
+        #expect(seats?["waitlist_count"] as? Int == 0)
+        #expect(seats?["waitlist_capacity"] as? Int == 0)
         let instructors = monday["instructors"] as? [[String: Any]] ?? []
         #expect(instructors.first?["name"] as? String == "Ada Lovelace")
         #expect(instructors.first?["email"] as? String == "ada@northeastern.edu")
@@ -1239,5 +1242,26 @@ enum MCPFixture {
             crossListCRNs: [], attributes: ["NCFQ"], description: nil, prereqs: nil, coreqs: nil,
             creditLow: creditLow, creditHigh: creditHigh, creditHours: creditHours, restrictions: restrictions
         )
+    }
+}
+
+extension MCPFixture {
+    /// A section with free seats and seven people on a waitlist of ten.
+    static func queuedSection() -> CourseSection {
+        var queued = section(crn: "3001", subject: "INAM", number: "1925", day: .monday, email: nil)
+        queued.waitlistCount = 7
+        queued.waitlistCapacity = 10
+        return queued
+    }
+}
+
+struct MCPWaitlistTests {
+    @Test func aQueuedSectionIsReportedNotOpenWithItsWaitlist() {
+        let queued = MCPFixture.queuedSection()
+        let seats = sectionJSON(queued)["seats"] as? [String: Any]
+        #expect(seats?["remaining"] as? Int == 3)
+        #expect(seats?["open"] as? Bool == false)
+        #expect(seats?["waitlist_count"] as? Int == 7)
+        #expect(seats?["waitlist_capacity"] as? Int == 10)
     }
 }

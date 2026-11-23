@@ -52,3 +52,66 @@ Also on `main`:
 - **Links.** `termorganize://course/<term>/<subject>/<number>`, `termorganize://section/<term>/<crn>`, `termorganize://schedule`, and `termorganize://search?q=...`, plus the older `neuclasssearch://` scheme (both schemes are in each app's `Info.plist`). iOS routing is `NEUClassSearchiOS/App/AppRouter.swift`. On the Mac, a course link opens a course window (`NEUClassSearchMac/App/MacRootView.swift`). Schedule, watchlist, plan, and search links go through `NEUClassSearchMac/App/MacNavigation.swift`. A seat-alert section link opens that course (`NEUClassSearchMac/Shell/MacShell.swift`).
 - **Offline catalogs.** Fall 2026 is `NEUClassSearch/Resources/Catalog/term-202710.catalog`. Spring 2027 is `term-202730.catalog` in the same folder.
 - **Local MCP helper.** `term-organize-mcp` is a stdio server in `TermOrganizeKit` for the bundled catalogs and for degree plans in `UserData.json`. Tool names are in [`docs/MCP.md`](docs/MCP.md).
+
+## Privacy
+
+Instructor email addresses are kept only when the domain is exactly `northeastern.edu` or `neu.edu`. The comparison is case-insensitive. The local part is kept as Banner wrote it. A subdomain is not that domain, so `husky.neu.edu`, `coe.neu.edu`, and `ece.northeastern.edu` are dropped, and so is any other host. If one field lists several addresses, only the institutional ones stay. A display name around an address (`Ada Lovelace <ada@northeastern.edu>`) is not stored as an address. The parser only accepts a normal mailbox. Text that is not one, including a lookalike host that does not parse as that mailbox or an obfuscated spelling, is not stored. The function is `InstructorEmail.institutional` in `TermOrganizeKit/Sources/TermOrganizeKit/Core/Banner/BannerModels.swift`. The tests are `instructorEmailsStayOnNortheasternDomains` in `NEUClassSearchTests/CoreModelTests.swift`. The catalog snapshot tool counts what it dropped (`Tools/CatalogSnapshot/main.swift`). The comment on `InstructorEmail` says this is not student personal data.
+
+There is no account in the app. `LegalText.privacyNotice` says there is no analytics and no tracking. Schedule text you type for Apple Intelligence is processed on the device.
+
+A degree-audit PDF can include a student name and ID. `DegreePlanFormat` reads the `Student:` and `StudentID:` lines on the device. On import, "Keep student name and ID for exports" starts on. Turn it off and both fields are cleared before the plan is saved (`NEUClassSearchMac/DegreePlans/MacDegreePlanImportSheet.swift`, `NEUClassSearchiOS/Features/DegreePlan/DegreePlanImportSheet.swift`). The sheet says they stay on this device and are never uploaded. If you leave them on, they stay in the local plan. iCloud sync removes them before upload (`CloudSyncModel.syncedForm` in `NEUClassSearch/Services/CloudSync/CloudSyncModel.swift`). PDF export omits them unless you turn on "Include student name and ID", which starts off (`NEUClassSearchMac/DegreePlans/MacDegreePlanExportSheet.swift`, `NEUClassSearchiOS/Features/DegreePlan/DegreePlanExportSheet.swift`).
+
+## Build and test
+
+This repository has no GitHub Actions workflow. There is no `.github` directory, so there is no CI command to copy. The steps below are what the project files define.
+
+The project was last upgraded with Xcode 27.0 (`LastUpgradeCheck = 2700` in `NEUClassSearch.xcodeproj/project.pbxproj`, and `LastUpgradeVersion = "2700"` on both shared schemes). Deployment targets are iOS 26.0 and macOS 26.0. `SWIFT_VERSION` is 5.0. `TermOrganizeKit/Package.swift` declares `swift-tools-version: 5.9`, platform macOS 26.0 only, and no external packages. The Xcode project references that local package and no remote packages.
+
+Shared schemes, in `NEUClassSearch.xcodeproj/xcshareddata/xcschemes/`:
+
+- `NEUClassSearch` builds the iPhone and iPad app. Its test action runs `NEUClassSearchTests`.
+- `NEUClassSearchMac` builds `Term Organize.app`. Its test action lists no test bundle.
+
+On a Mac, open `NEUClassSearch.xcodeproj`, pick a scheme, and use Product > Run or Product > Test. For your own device, set the development team on `NEUClassSearch`, `NEUClassSearchWidgets`, and `NEUClassSearchMac`. The checked-in team is `832J6JB4V7`.
+
+A command-line test of `NEUClassSearch` needs a simulator name. Neither shared scheme names one. Product > Test on that scheme is the test action in the project.
+
+A Mac build with no development team can use `NEUClassSearchMac/NEUClassSearchMac-Local.entitlements`. That file keeps the sandbox and drops iCloud and push. The app then shows iCloud sync as not set up:
+
+```bash
+xcodebuild -project NEUClassSearch.xcodeproj -scheme NEUClassSearchMac -configuration Debug -destination 'platform=macOS' CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= CODE_SIGN_ENTITLEMENTS=NEUClassSearchMac/NEUClassSearchMac-Local.entitlements build
+```
+
+Package tests use a temporary `UserData.json`. They do not read a real plans file (`TermOrganizeKit/Tests/TermOrganizeMCPTests/`):
+
+```bash
+cd TermOrganizeKit
+swift test
+```
+
+`Package.swift` declares macOS 26.0 as its only platform.
+
+To rebuild a bundled catalog, run `Tools/build-catalog-snapshot.sh` with an optional term code. On macOS the script compiles with `xcrun swiftc -swift-version 5`. On Linux it needs `swiftc` and the `lzfse` command, then compresses the JSON.
+
+The Mac app group used with a team signature is `832J6JB4V7.com.alexchadwick.termorganize`. The iOS app and widget group is `group.com.alexchadwick.neuclasssearch` (`TermOrganizeKit/Sources/TermOrganizeKit/Services/AppPaths.swift`, `Shared/WidgetScheduleData.swift`). Details for the MCP helper are in [`docs/MCP.md`](docs/MCP.md).
+
+## Layout
+
+```
+TermOrganizeKit/          shared models, Banner client, search, degree and schedule logic, MCP server
+NEUClassSearch/           sources compiled into both apps (CloudKit, Spotlight, PDF, watchlist, design system)
+NEUClassSearchiOS/        iPhone and iPad interface
+NEUClassSearchMac/        Mac interface
+NEUClassSearchWidgets/    WidgetKit extension
+NEUClassSearchTests/      Swift Testing suites for the NEUClassSearch scheme
+Shared/                   code compiled into the apps and the widgets
+Tools/                    catalog snapshot script
+docs/MCP.md               MCP tool reference
+```
+
+## License
+
+Copyright (C) 2026 Term Organize contributors.
+Source: <https://github.com/AlexmChadwick/Northeastern-Term-Organize>.
+
+GNU Affero General Public License v3.0 only. The text is [`LICENSE`](LICENSE). There is no warranty. See `LegalText.noWarranty` and `LegalText.licenseGrant`. Course information is copyright Northeastern University (`LegalText.dataNotice`).

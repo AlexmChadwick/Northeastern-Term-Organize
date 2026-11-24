@@ -1,385 +1,117 @@
 # Term Organize
 
-An unofficial iPhone, iPad and Mac app for Northeastern University course search, schedule
-building, degree planning and seat alerts — an on-device adaptation of
-[SearchNEU](https://github.com/sandboxnu/searchneu) by [Sandbox](https://sandboxnu.com),
-redesigned for iOS 26 and macOS 26 with Liquid Glass.
+**Term Organize is unofficial. It is not affiliated with or endorsed by Northeastern University.**
 
-> Not affiliated with, endorsed by, or sponsored by Northeastern University or Sandbox.
+The same notice is in the app (`LegalText.unofficialNotice` in `TermOrganizeKit/Sources/TermOrganizeKit/Logic/Settings/LegalText.swift`): "Not affiliated with, endorsed by, or sponsored by Northeastern University or Sandbox."
 
-## Platforms and status
+Term Organize is a course planner for iPhone, iPad, and Mac. It searches Northeastern's public class listings, builds schedules, checks a degree plan, and watches seats. It is free software under the GNU Affero General Public License v3.0 only. Parts of the Banner parsing, requisite logic, and schedule generation are adapted from [SearchNEU](https://github.com/sandboxnu/searchneu) by Sandbox. See [`NOTICE.md`](NOTICE.md).
 
-- **macOS / iOS (Swift reference):** [AlexmChadwick/Northeastern-Term-Organize](https://github.com/AlexmChadwick/Northeastern-Term-Organize) (this repository) - Mac app released, latest v1.1.3 at [github.com/AlexmChadwick/Northeastern-Term-Organize/releases](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases). iPhone and iPad builds are sideload only (test builds only, not on the App Store or TestFlight).
-- **Web:** [AlexmChadwick/term-organize-web](https://github.com/AlexmChadwick/term-organize-web) - port in development, with no published release or store listing.
-- **Android:** [AlexmChadwick/term-organize-android](https://github.com/AlexmChadwick/term-organize-android) - port in development, with no published release or store listing.
-- **Linux:** [AlexmChadwick/term-organize-linux](https://github.com/AlexmChadwick/term-organize-linux) - port in development, with no published release or store listing.
-- **Windows:** [AlexmChadwick/term-organize-windows](https://github.com/AlexmChadwick/term-organize-windows) - port in development, with no published release or store listing.
+Class data comes from Northeastern's public Banner class search. `BannerClient.baseURL` in `TermOrganizeKit/Sources/TermOrganizeKit/Core/Banner/BannerClient.swift` is `https://nubanner.neu.edu/StudentRegistrationSsb/ssb/`. Degree-requirement pages are read from the public catalog at `catalog.northeastern.edu` (`TermOrganizeKit/Sources/TermOrganizeKit/Services/ProgramCatalogRepository.swift`).
 
-## Install
+## Version
 
-### Mac
+The Xcode project marketing version is **1.1.3**, build **5** (`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `NEUClassSearch.xcodeproj/project.pbxproj`). That matches the latest GitHub release, [v1.1.3](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases/tag/v1.1.3) (9 November 2026). The asset is [`Term-Organize-1.1.3-5.zip`](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases/download/v1.1.3/Term-Organize-1.1.3-5.zip).
 
-1. Download `Term-Organize-1.1.3-5.zip` from the [v1.1.3 release](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases/tag/v1.1.3). Newer builds go on the [Releases page](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases).
-2. Unzip it and drag **Term Organize** into your Applications folder.
-3. Open it. The build is signed with a Developer ID (team `832J6JB4V7`) and notarized by Apple, so macOS opens it without extra steps.
+SHA-256 of that zip, from the release notes:
 
-### iPhone and iPad
-
-Term Organize is not on the App Store or TestFlight yet. You can sideload it by building it yourself:
-
-1. Open `NEUClassSearch.xcodeproj` in Xcode (see Requirements below).
-2. Pick the `NEUClassSearch` scheme and your connected device.
-3. Under Signing & Capabilities, choose your own team. A free Apple ID works, but apps signed with a free account expire after 7 days and need to be rebuilt. A paid developer account lasts a year.
-4. Press Run. On the device, trust your developer profile in Settings > General > VPN & Device Management if asked.
-
-### Build from source (Mac)
-
-Open `NEUClassSearch.xcodeproj` in Xcode, pick the `NEUClassSearchMac` scheme and My Mac, and press Run.
-
-## Highlights
-
-- **Search everything** — courses by code (`cs3000`, `CS 3`), title, topic, professor or
-  CRN, with typo tolerance and student shorthand (`orgo`, `linalg`, `fundies`, `ml`).
-  Filter by subject, NUpath, level, credits, campus, class type, instruction mode, meeting
-  days and times, honors and open seats.
-- **Course pages** — descriptions, prerequisite/corequisite trees, “prerequisite for”,
-  every section with instructors, meeting times, locations, seats and waitlists, refreshed
-  live from Northeastern's registration system.
-- **Schedule builder** — collect courses into plans, pick sections on a week calendar with
-  conflict detection, or generate ranked conflict-free schedules that match your
-  constraints (start/end times, free days, campus, seats…). Export to Calendar or `.ics`, share as an image, copy
-  CRNs for registration.
-- **Degree plans** — import the PDF from the degree audit planner's *View Plan* (or open it
-  from Files/Mail with “Open in Term Organize”), see every semester with prerequisite
-  checks, duplicate warnings and credit totals, edit it, and export it again as a PDF in the
-  same layout. New plans start from your latest plan plus your “My Schedule” courses, and a
-  new schedule autofills with the courses you planned for that semester (or the closest one
-  you planned). Course pages mark completed prerequisites and show where a course is planned.
-- **Degree requirements** — pick your catalog year, program and concentration, and the plan is
-  checked against that year's requirements from Northeastern's academic catalog: every listed
-  course with its status (completed, in progress, planned for a semester, or not in plan),
-  "complete N of the following" lists, elective ranges and general electives, plus when you'll
-  finish. Each course counts once, and the audit makes sure no other way of matching your
-  courses to the requirements meets more of them (if every requirement can be met, it shows
-  them met). Record course substitutions, petitions that replace a requirement (say, "two
-  courses like the Khoury electives" — the app asks whether that requirement's minimum course
-  number applies to your petition), and waivers; a course a short requirement's number range
-  just misses can be counted with one tap once an adviser approves it. Topics courses taken
-  twice count twice, and substitutions follow their requirement when you change catalog
-  years. A substitution that is really a renumbered course (CS 3484 for the retired IS 4800)
-  can become one, and then reads like any renumbered course. Requirements the catalog states
-  in words are checked too: hours in the major, co-op, total hours, every NUpath requirement
-  (from the NUpath attributes of each course's sections; one course counts for at most two of
-  the eight areas) and the catalog year's Universitywide minimums. The GPA and residency, which
-  a plan can't show, are marked as not checked. Catalog years and programs are read from the
-  catalog site itself, so a new catalog year works without an app update. An unofficial
-  planning aid; the registrar's audit is official.
-- **Smarter prerequisite checks** — courses that aren't offered this term are checked against
-  Banner's course catalog from earlier terms, and renumbered courses (say CS 2510 → CS 2100)
-  can be marked as counting for each other, with suggestions taken from how prerequisites list
-  them together.
-- **Your ideal week** — tell the schedule generator what you want: preferred times of day,
-  earliest start and latest finish, days off, no-go times (club meetings, work, commute),
-  breaks and lunch, classes per day, walking time between buildings, format, campus and
-  instructors — as a survey with presets, or by describing it in your own words, which Apple
-  Intelligence turns into survey answers on the device for you to review. Schedules are ranked
-  by how well they match, with the reasons shown. When nothing fits, the app names the courses
-  in the way and, with a degree plan, suggests moving one to a semester it has historically been
-  offered in.
-- **Seat alerts** — watch full sections; background refresh + local notifications tell you
-  when seats or waitlist spots open (SearchNEU uses SMS; this runs entirely on device).
-- **Free rooms** — see which classrooms are empty right now (or at any time) and each
-  room's weekly schedule.
-- **Professors** — every instructor's sections and weekly teaching calendar.
-- **Widgets** — “Up Next” (Home & Lock Screen) and a daily class agenda; an “Up Next”
-  accessory above the tab bar.
-- **Spotlight & Siri** — courses are indexed in Spotlight; App Shortcuts answer
-  “What's my next class?”, open your schedule, or search courses.
-- **Deep links** — `termorganize://course/202710/CS/3000`, `…/section/202710/<crn>`,
-  `…/schedule`, `…/search?q=…`. Links from before the rename (`neuclasssearch://…`) still open.
-
-## On the Mac
-
-The Mac app shares everything but its interface with the iPhone and iPad app (the catalog,
-search, schedules, degree plans and audit, seat alerts, iCloud sync) and is laid out the
-Mac way:
-
-- **One window, a sidebar** of areas (Search, Subjects, Saved, Professors, Free Rooms), the
-  term's schedules, degree plans and the watchlist; the term menu sits in the toolbar.
-- **Made for big screens**: every screen splits into panes you can resize by dragging the
-  divider (double-click resets it; drag it all the way over to close the pane), and the panes
-  keep their share as the window grows. A degree plan shows its requirements side by side
-  (drag a course you still need onto a semester to plan it); schedules show as cards with
-  their weeks, Free Rooms as a timeline of every room. Show or hide a screen's side pane with
-  View › Show/Hide (⌥⌘0). In a small window, side panes float over the main view instead of
-  making the window wider.
-- **Tables** for search results, sections, watched sections and rooms — sortable columns,
-  context menus, double-click or Return to open, Delete to remove, ⌘C to copy CRNs.
-- **Course and professor windows** open side by side, from anywhere.
-- **Menus and shortcuts**: New Schedule ⌘N, New Degree Plan ⇧⌘N, Import Degree Plan ⌘O,
-  Export ⌘E, Print ⌘P, Reload ⌘R, the areas on ⌘1–⌘8, plus Schedule and Degree Plan menus.
-- **Drag and drop**: drop a degree audit PDF on the window to import it, drag courses
-  between semesters, drop course codes into a schedule.
-- **Settings** (⌘,): General, Data, iCloud, Notifications and About (license, attribution
-  and acknowledgements).
-- **Up Next** in the menu bar: the class in progress or the next one, and today's classes.
-- **Seat alerts** are checked every 15 minutes while the app is open (configurable).
-
-## Runs fully on device
-
-There is no backend. The app ships with compressed snapshots of the Fall 2026 and Spring 2027
-catalogs for offline use. With no term chosen yet, it opens the newest bundled term. When
-online it talks **directly** to Northeastern's public Banner class search
-(`nubanner.neu.edu`) to:
-
-- refresh seats for a course when you open it,
-- download sections for a term that isn't bundled yet,
-- lazily fetch descriptions, requisites and instructors for courses that aren't in the
-  snapshot,
-- look up the catalog entry (prerequisites, credits) of a course that isn't offered this term,
-  which recent terms offered it, and the NUpath attributes of its sections (for the NUpath
-  check),
-- check watched sections for open seats.
-
-For degree requirements it also reads Northeastern's public academic catalog
-(`catalog.northeastern.edu`): the list of catalog years, the year's program index, your
-program's page and the year's Universitywide Requirements page — fetched once per catalog year (the current year is re-checked weekly) and kept
-on device. Nothing about you is sent to either site.
-
-Your plans, degree plans, watchlist, bookmarks and preferences are stored as JSON in the
-app's Application Support folder. With [iCloud sync](#icloud-sync) on, they are also kept in
-your own private iCloud database so they sync between your devices; nothing is uploaded
-anywhere else. Degree audit PDFs are read on device with PDFKit; the student name and ID
-they contain are kept only if you choose to, never synced, and left out of exports unless
-you include them.
-
-## iCloud sync
-
-Schedules, degree plans, the watchlist, saved courses and a few preferences sync between a
-user's iPhone, iPad and Mac through **their private CloudKit database** (container
-`iCloud.com.alexchadwick.neuclasssearch`). Only the user can read that database; the
-developers can't. Each item's data is stored in CloudKit's end-to-end encrypted fields.
-Settings › iCloud has a **Sync with iCloud** switch (on by default), the sync status and
-**Sync now**.
-
-| Syncs | Stays on the device |
-| --- | --- |
-| Schedule plans (courses, sections, filters, favorites, primary plan) | Recent courses and search history |
-| Degree plans, requirements choices and substitutions | The student name and ID from an imported degree audit |
-| Watched sections and their waitlist setting | Each device's seat checks and alerts (every device checks and notifies on its own) |
-| Saved courses | The term being browsed |
-| Preferred campus, calendar weekends and hours | Onboarding, auto-refresh and background-refresh settings |
-
-How it works (`NEUClassSearch/Services/CloudSync/`):
-
-- [`CKSyncEngine`](https://developer.apple.com/documentation/cloudkit/cksyncengine) syncs
-  one custom zone, `UserData`, with one record per item whose name is the item's id. Records
-  carry `payload` (the item's JSON), `modifiedAt` and `schemaVersion`. Records written by a
-  newer version of the app (a higher `schemaVersion`) or that can't be read are left alone,
-  never overwritten or deleted.
-- After each local save the app compares fingerprints of its data with what iCloud last
-  confirmed and queues only what changed. Changes received from iCloud are never sent back.
-- Conflicts: the most recent change wins (an item's own `updatedAt` where it has one,
-  otherwise when it changed on the device); preferences merge setting by setting. An item
-  deleted on one device is deleted everywhere, unless another device changed it since, in
-  which case that version is kept.
-- Accounts: on sign-in, the device's data is merged with the account's. Signing out keeps
-  the data on the device and stops syncing. If a different Apple Account signs in, or the
-  app's iCloud data is deleted in Settings, sync turns itself off (keeping the device's data)
-  until the user turns it on again.
-- **Erase all schedules, watchlist & bookmarks** in Settings also erases them from iCloud
-  (and so from the user's other devices) while sync is on; the confirmation says so.
-- Sync bookkeeping (CloudKit system fields, the engine's state) lives in
-  `Application Support/CloudSync/`. Unit tests: `NEUClassSearchTests/CloudSyncTests.swift`.
-
-To enable it in your build:
-
-1. In Xcode, select the **NEUClassSearch** target › *Signing & Capabilities* and choose
-   your development team (and the same team for `NEUClassSearchWidgets` and, for the Mac,
-   `NEUClassSearchMac`).
-2. The iCloud (CloudKit) and Push Notifications capabilities are already declared in
-   `NEUClassSearchiOS/NEUClassSearch.entitlements` and
-   `NEUClassSearchMac/NEUClassSearchMac.entitlements`, with the container
-   `iCloud.com.alexchadwick.neuclasssearch`. With automatic signing, Xcode registers the
-   container for your team the first time you build to a device (check the iCloud section
-   of *Signing & Capabilities*). If you change the bundle identifier, change the container in
-   the entitlements file and in Info.plist's `NEUCloudKitContainerIdentifier` key together.
-3. Run the app on two devices signed in to the same Apple Account (iCloud turned on) and
-   leave **Sync with iCloud** on. The app checks when it opens and when it returns to the
-   foreground. Settings › iCloud shows a read-only diagnostics line: the CloudKit
-   environment (`Development` or `Production`), the account status, the last sync, and the
-   last error. Both devices have to show the same environment before they can see each
-   other's data.
-4. A build run from Xcode uses CloudKit's Development database. A distribution build
-   (Developer ID, Ad Hoc, TestFlight, or the App Store) uses Production. The checked-in
-   entitlements do not name the database. Before a Production client can save this app's
-   record types, deploy the schema from Development to Production in
-   [CloudKit Console](https://icloud.developer.apple.com). Development creates those record
-   types on first save. A generic "Couldn't sync with iCloud" message is one possible sign
-   that the schema has not been deployed. Most other CloudKit errors use that same string,
-   so it is not proof by itself. Compare the diagnostics line on both devices.
-
-A build without `NEUCloudKitContainerIdentifier`, or one whose signature lacks the iCloud
-entitlements for the container, never touches CloudKit and shows "iCloud sync isn't set up
-in this build". Without an iCloud account (as in a fresh simulator) it shows "Sign in to
-iCloud in Settings to sync". Either way the app works as before.
-
-## Requirements
-
-- Xcode 27 (built and tested with Xcode 27.0 beta, 27A5218g); iOS 26.0+ and macOS 26.0+
-  deployment targets.
-- No third-party dependencies.
-
-Run the unit tests (search engine, Banner parsers, schedule generator, degree plan
-import/export, iCloud sync merging, models) with
-⌘U in Xcode, or:
-
-```bash
-xcodebuild test -project NEUClassSearch.xcodeproj -scheme NEUClassSearch -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+```
+39fc6b6fee3e5508c90cf309e2a1eee56da0b8c12b98f19660418c099f88ab68
 ```
 
-Open `NEUClassSearch.xcodeproj`, choose the **NEUClassSearch** scheme and run. For a
-device build, set your development team under *Signing & Capabilities* for both the app
-and the `NEUClassSearchWidgets` extension, and change the bundle identifiers / app group
-(`group.com.alexchadwick.neuclasssearch`, also referenced in `TermOrganizeKit/Sources/TermOrganizeKit/Services/AppPaths.swift`
-and `Shared/WidgetScheduleData.swift`) if needed.
+The v1.1.3 release notes say the zip is Developer ID signed and notarized. The project sets `DEVELOPMENT_TEAM` to `832J6JB4V7`.
 
-For the Mac, choose the **NEUClassSearchMac** scheme. To build it without a development
-team, sign it locally with the sandbox
-entitlements in `NEUClassSearchMac/NEUClassSearchMac-Local.entitlements`:
+This repository's published release is the Mac app. iPhone and iPad builds come from the Xcode project. There is no App Store metadata in this repository.
+
+## Install the Mac app
+
+1. Download `Term-Organize-1.1.3-5.zip` from the [v1.1.3 release](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases/tag/v1.1.3). Later Mac builds, if any, are on the [Releases page](https://github.com/AlexmChadwick/Northeastern-Term-Organize/releases).
+2. Unzip it and drag **Term Organize** into Applications.
+3. Open it. The release notes say the notarized build opens without extra steps.
+
+## Features
+
+Everything below is in the source on `main`. The path is where to start reading.
+
+- **Search, with an All / Undergrad / Grad filter.** Undergrad is a course number below 5000. Grad is 5000 and above. The rule is `DegreeLevelFilter` in `TermOrganizeKit/Sources/TermOrganizeKit/Services/SearchEngine.swift`. The control is `DegreeLevelFilterPicker` in `NEUClassSearch/DesignSystem/Components/CreditChoiceControl.swift`, used by `NEUClassSearchiOS/Features/Search/SearchFilterBar.swift` and `NEUClassSearchMac/Catalog/MacSearchFilterBar.swift`. Search matches codes, titles, instructors, and CRNs. It expands student shorthand (`SearchText.aliases`: `orgo`, `linalg`, `fundies`, `ml`, and the rest of that table) and allows small typos (`SearchText.editDistance`). `SearchFilters` in the same file also covers subject, NUpath, level, credits, campus, class type, instruction mode, meeting days and times, honors, and open seats.
+- **Schedules.** Collect courses, pick sections, and generate ranked conflict-free options (`TermOrganizeKit/Sources/TermOrganizeKit/Logic/Schedule/ScheduleGenerator.swift`, `NEUClassSearchMac/Schedules/`, `NEUClassSearchiOS/Features/Schedule/`). Time, day, and campus preferences live in `TermOrganizeKit/Sources/TermOrganizeKit/Logic/Schedule/SchedulePreferences.swift`. A written description of the week can be filled into that survey on device with Apple Intelligence (`NEUClassSearch/Logic/Schedule/ScheduleAssistant.swift`, `NEUClassSearchiOS/Features/Schedule/SchedulePreferencesView.swift`).
+- **Calendar export.** A plan can be added to Calendar or shared as `.ics`. The Mac sheet can also save a picture (`NEUClassSearch/Logic/Schedule/ScheduleExporter.swift`, `NEUClassSearchMac/Schedules/MacScheduleExport.swift`, `NEUClassSearchiOS/Features/Schedule/ScheduleExportViews.swift`).
+- **Degree plans and an unofficial audit.** Import a degree-audit View Plan PDF, edit the semesters, and export a PDF in that layout (`TermOrganizeKit/Sources/TermOrganizeKit/Logic/DegreePlan/DegreePlanFormat.swift`, `NEUClassSearchMac/DegreePlans/MacDegreePlanImportSheet.swift`, `NEUClassSearchMac/DegreePlans/MacDegreePlanExportSheet.swift`, and the matching files under `NEUClassSearchiOS/Features/DegreePlan/`). Both apps register PDF as a document type in their `Info.plist`. Requirements for a catalog year and program are checked in `TermOrganizeKit/Sources/TermOrganizeKit/Logic/DegreePlan/DegreeAudit.swift`. NUpath handling is in `DegreeNUpath.swift`: one course counts for at most two of the eight areas. GPA and residency stay unchecked, because a plan has no grades and does not say where the credits were earned. Substitutions and petitions can be recorded. The requirements screen says: "Unofficial planning aid. Confirm with your degree audit and academic advisor." (`NEUClassSearchiOS/Features/DegreePlan/DegreeRequirementsView.swift`, `NEUClassSearchMac/DegreePlans/MacDegreeRequirementsView.swift`).
+- **Variable credits.** When the low and high credit values differ, a stepper sets a whole-credit value inside that range (`CreditSpan` in `TermOrganizeKit/Sources/TermOrganizeKit/Core/Models/VariableCredits.swift`, `CreditChoiceControl` in `NEUClassSearch/DesignSystem/Components/CreditChoiceControl.swift`).
+- **CPS restriction note.** A section limited to College of Professional Studies students is captioned "Restricted to CPS (College of Professional Studies) students". If only some sections are, the caption is "Some sections are CPS only" (`CPSNote` in `TermOrganizeKit/Sources/TermOrganizeKit/Core/Models/SectionRestriction.swift`).
+- **Seat status.** Seats are remaining versus capacity. None left reads "Full". The color is red when none remain, orange when few remain, and green otherwise (`Theme.seatColor` in `NEUClassSearch/DesignSystem/Theme.swift`, `SeatsBadge` in `NEUClassSearch/DesignSystem/Components/Badges.swift`). A section counts as open when `seatsRemaining > 0` (`CourseSection.isOpen` in `TermOrganizeKit/Sources/TermOrganizeKit/Core/Models/CourseSection.swift`). Waitlist counts are shown when Banner sends them (`SeatsBadge`, `NEUClassSearchMac/Catalog/MacSectionCells.swift`).
+- **Watchlist and local notifications.** A watched section notifies when it goes from no seats to some seats. If "also notify on waitlist" is on, a still-full section can also notify when a waitlist spot appears (`TermOrganizeKit/Sources/TermOrganizeKit/Logic/Watchlist/WatchlistComparison.swift`, `NEUClassSearch/Logic/Watchlist/WatchlistService.swift`, `NEUClassSearch/Logic/Watchlist/WatchlistNotifications.swift`). On Mac, while the app is open, the default gap is 15 minutes. Settings offers 5, 10, 15, 30, or 60 (`NEUClassSearchMac/Shell/MacWatchlistMonitor.swift`). On iPhone and iPad the app asks iOS for a background check in about 20 minutes (`WatchlistService.backgroundRefreshInterval`). The watchlist screen says checks run about every 30 minutes when iOS allows (`NEUClassSearchiOS/Features/Watchlist/WatchlistTabView.swift`).
+- **iCloud sync.** Schedules, degree plans (without the student name and ID), the watchlist (without each device's own seat-check results), saved courses, and a few preferences sync in the user's private CloudKit database. The container is `iCloud.com.alexchadwick.neuclasssearch` (`NEUCloudKitContainerIdentifier` in `NEUClassSearchiOS/Info.plist` and `NEUClassSearchMac/Info.plist`). What syncs is written down in `NEUClassSearch/Services/CloudSync/CloudSyncModel.swift`. Preferred campus, weekend columns, and calendar hours sync (`CloudSyncedPreferences`). The term being browsed, onboarding, auto-refresh, background refresh, recent courses, and search history stay on the device.
+- **Keyboard list navigation on the Mac.** Up and down arrows move the highlight in Add Course (`NEUClassSearchMac/Schedules/MacAddCourseView.swift`, `NEUClassSearchMac/DegreePlans/MacDegreePlanAddCourse.swift`). Arrow keys also move through schedule cards, generated schedules, and degree-plan cards (`NEUClassSearchMac/Schedules/MacScheduleCards.swift`, `NEUClassSearchMac/Schedules/MacScheduleGenerator.swift`, `NEUClassSearchMac/DegreePlans/MacDegreePlanCards.swift`). Search results are a table: Return opens the selection (`NEUClassSearchMac/Catalog/MacCatalogCourseTable.swift`). The Go menu is Command-1 through Command-8 (`NEUClassSearchMac/Shell/MacCommands.swift`).
+
+Also on `main`:
+
+- **Free rooms.** `TermOrganizeKit/Sources/TermOrganizeKit/Logic/Rooms/RoomAvailability.swift`, `NEUClassSearchMac/Shell/MacRoomsView.swift`, `NEUClassSearchiOS/Features/Rooms/RoomsTabView.swift`.
+- **Professors.** `TermOrganizeKit/Sources/TermOrganizeKit/Logic/Professors/ProfessorDirectoryData.swift`, `NEUClassSearchMac/Catalog/MacProfessorsView.swift`, `NEUClassSearchiOS/Features/Professors/ProfessorsDirectoryView.swift`.
+- **Widgets.** Up Next and a daily agenda (`NEUClassSearchWidgets/UpNextWidget.swift`, `NEUClassSearchWidgets/TodayScheduleWidget.swift`).
+- **Spotlight and shortcuts.** Courses are indexed for Spotlight (`NEUClassSearch/Services/SpotlightIndexer.swift`). App Shortcuts answer the next class, open the schedule, or search courses (`NEUClassSearchiOS/Features/Intents/ClassSearchIntents.swift`).
+- **Links.** `termorganize://course/<term>/<subject>/<number>`, `termorganize://section/<term>/<crn>`, `termorganize://schedule`, and `termorganize://search?q=...`, plus the older `neuclasssearch://` scheme (both schemes are in each app's `Info.plist`). iOS routing is `NEUClassSearchiOS/App/AppRouter.swift`. On the Mac, a course link opens a course window (`NEUClassSearchMac/App/MacRootView.swift`). Schedule, watchlist, plan, and search links go through `NEUClassSearchMac/App/MacNavigation.swift`. A seat-alert section link opens that course (`NEUClassSearchMac/Shell/MacShell.swift`).
+- **Offline catalogs.** Fall 2026 is `NEUClassSearch/Resources/Catalog/term-202710.catalog`. Spring 2027 is `term-202730.catalog` in the same folder.
+- **Local MCP helper.** `term-organize-mcp` is a stdio server in `TermOrganizeKit` for the bundled catalogs and for degree plans in `UserData.json`. Tool names are in [`docs/MCP.md`](docs/MCP.md).
+
+## Privacy
+
+Instructor email addresses are kept only when the domain is exactly `northeastern.edu` or `neu.edu`. The comparison is case-insensitive. The local part is kept as Banner wrote it. A subdomain is not that domain, so `husky.neu.edu`, `coe.neu.edu`, and `ece.northeastern.edu` are dropped, and so is any other host. If one field lists several addresses, only the institutional ones stay. A display name around an address (`Ada Lovelace <ada@northeastern.edu>`) is not stored as an address. The parser only accepts a normal mailbox. Text that is not one, including a lookalike host that does not parse as that mailbox or an obfuscated spelling, is not stored. The function is `InstructorEmail.institutional` in `TermOrganizeKit/Sources/TermOrganizeKit/Core/Banner/BannerModels.swift`. The tests are `instructorEmailsStayOnNortheasternDomains` in `NEUClassSearchTests/CoreModelTests.swift`. The catalog snapshot tool counts what it dropped (`Tools/CatalogSnapshot/main.swift`). The comment on `InstructorEmail` says this is not student personal data.
+
+There is no account in the app. `LegalText.privacyNotice` says there is no analytics and no tracking. Schedule text you type for Apple Intelligence is processed on the device.
+
+A degree-audit PDF can include a student name and ID. `DegreePlanFormat` reads the `Student:` and `StudentID:` lines on the device. On import, "Keep student name and ID for exports" starts on. Turn it off and both fields are cleared before the plan is saved (`NEUClassSearchMac/DegreePlans/MacDegreePlanImportSheet.swift`, `NEUClassSearchiOS/Features/DegreePlan/DegreePlanImportSheet.swift`). The sheet says they stay on this device and are never uploaded. If you leave them on, they stay in the local plan. iCloud sync removes them before upload (`CloudSyncModel.syncedForm` in `NEUClassSearch/Services/CloudSync/CloudSyncModel.swift`). PDF export omits them unless you turn on "Include student name and ID", which starts off (`NEUClassSearchMac/DegreePlans/MacDegreePlanExportSheet.swift`, `NEUClassSearchiOS/Features/DegreePlan/DegreePlanExportSheet.swift`).
+
+## Build and test
+
+This repository has no GitHub Actions workflow. There is no `.github` directory, so there is no CI command to copy. The steps below are what the project files define.
+
+The project was last upgraded with Xcode 27.0 (`LastUpgradeCheck = 2700` in `NEUClassSearch.xcodeproj/project.pbxproj`, and `LastUpgradeVersion = "2700"` on both shared schemes). Deployment targets are iOS 26.0 and macOS 26.0. `SWIFT_VERSION` is 5.0. `TermOrganizeKit/Package.swift` declares `swift-tools-version: 5.9`, platform macOS 26.0 only, and no external packages. The Xcode project references that local package and no remote packages.
+
+Shared schemes, in `NEUClassSearch.xcodeproj/xcshareddata/xcschemes/`:
+
+- `NEUClassSearch` builds the iPhone and iPad app. Its test action runs `NEUClassSearchTests`.
+- `NEUClassSearchMac` builds `Term Organize.app`. Its test action lists no test bundle.
+
+On a Mac, open `NEUClassSearch.xcodeproj`, pick a scheme, and use Product > Run or Product > Test. For your own device, set the development team on `NEUClassSearch`, `NEUClassSearchWidgets`, and `NEUClassSearchMac`. The checked-in team is `832J6JB4V7`.
+
+A command-line test of `NEUClassSearch` needs a simulator name. Neither shared scheme names one. Product > Test on that scheme is the test action in the project.
+
+A Mac build with no development team can use `NEUClassSearchMac/NEUClassSearchMac-Local.entitlements`. That file keeps the sandbox and drops iCloud and push. The app then shows iCloud sync as not set up:
 
 ```bash
 xcodebuild -project NEUClassSearch.xcodeproj -scheme NEUClassSearchMac -configuration Debug -destination 'platform=macOS' CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= CODE_SIGN_ENTITLEMENTS=NEUClassSearchMac/NEUClassSearchMac-Local.entitlements build
 ```
 
-## Local MCP server
-
-`term-organize-mcp` is a local stdio server for the two catalogs bundled with the app
-(Fall 2026 `202710` and Spring 2027 `202730`) and for the degree plans stored in
-`UserData.json`. Schedules are listed separately and are not what the write tools edit.
-It does not use the network. Tool names, JSON shapes, the plan file, and the read-only
-switch are in [`docs/MCP.md`](docs/MCP.md).
-
-Build it with Swift 6.2 or newer (the package declares a macOS 26 deployment target):
+Package tests use a temporary `UserData.json`. They do not read a real plans file (`TermOrganizeKit/Tests/TermOrganizeMCPTests/`):
 
 ```bash
 cd TermOrganizeKit
-swift build -c release
+swift test
 ```
 
-The `swift build` binary is `TermOrganizeKit/.build/release/term-organize-mcp`. Pass
-`--read-only`, or set `TERM_ORGANIZE_MCP_READONLY=1`, to hide every tool that writes a
-plan. `list_plans` and `get_plan` stay available.
+`Package.swift` declares macOS 26.0 as its only platform.
 
-A team-signed Mac app embeds the helper here, signed with team `832J6JB4V7` and the
-group-only entitlements in `TermOrganizeKit/term-organize-mcp.entitlements`:
+To rebuild a bundled catalog, run `Tools/build-catalog-snapshot.sh` with an optional term code. On macOS the script compiles with `xcrun swiftc -swift-version 5`. On Linux it needs `swiftc` and the `lzfse` command, then compresses the JSON.
 
-```
-Term Organize.app/Contents/Helpers/term-organize-mcp
-```
+The Mac app group used with a team signature is `832J6JB4V7.com.alexchadwick.termorganize`. The iOS app and widget group is `group.com.alexchadwick.neuclasssearch` (`TermOrganizeKit/Sources/TermOrganizeKit/Services/AppPaths.swift`, `Shared/WidgetScheduleData.swift`). Details for the MCP helper are in [`docs/MCP.md`](docs/MCP.md).
 
-Point clients at that embedded binary. User script sandboxing stays on. The Xcode
-target is `term-organize-mcp`. It links the TermOrganizeKit package product.
-
-Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "term-organize": {
-      "command": "/ABSOLUTE/PATH/Term Organize.app/Contents/Helpers/term-organize-mcp"
-    }
-  }
-}
-```
-
-Cursor (`.cursor/mcp.json` in this repo, or the user MCP config):
-
-```json
-{
-  "mcpServers": {
-    "term-organize": {
-      "command": "/ABSOLUTE/PATH/Term Organize.app/Contents/Helpers/term-organize-mcp",
-      "args": []
-    }
-  }
-}
-```
-
-To start it read-only, add `"args": ["--read-only"]`.
-
-Messages are one JSON object per line. There is no Content-Length header.
-
-On a team-signed Mac, the app and this helper share the app group
-`832J6JB4V7.com.alexchadwick.termorganize` (team `832J6JB4V7`). `UserData.json` lives in
-that group container. Team signing does not need a separate portal registration step
-for the group. The iOS widget group is unchanged. Only the Mac app copies the old
-Application Support file into the group, keeps `UserData.json.premigration.bak`, and
-deletes the original only after the copy matches. The helper never reads, moves, or
-deletes the app container. If the group file is missing and that container file is
-still there, plan tools return `storage_error` with the message "Open Term Organize
-once to finish moving your plans". See [`docs/MCP.md`](docs/MCP.md).
-If the app still has an unsaved edit when the file changes, the next flush merges plans
-that were edited separately. Schedules that share a folder are one plan, so a conflict
-keeps the file's version and one copy named "<plan> (edited in app)". The sidebar
-badge says "App edit" and the visible label drops that suffix. The stored name keeps it.
-
-Run the server tests with `cd TermOrganizeKit && swift test`. They use a temporary
-`UserData.json` and never the real plans file.
-
-## Regenerating the bundled catalog
-
-```bash
-Tools/build-catalog-snapshot.sh            # newest term Banner lists
-Tools/build-catalog-snapshot.sh 202730     # a specific term (e.g. Spring 2027)
-```
-
-The script compiles a small command-line tool from `TermOrganizeKit/Sources/TermOrganizeKit/Core` and scrapes
-the term the same way SearchNEU's scraper does (sections, instructors, descriptions,
-requisites, catalog titles) with modest request concurrency. Instructor email addresses are
-kept only when the domain is `northeastern.edu` or `neu.edu`. A full term takes about
-20–25 minutes and writes `term-<code>.catalog` into `NEUClassSearch/Resources/Catalog/`.
-On Linux, install a Swift toolchain and the [lzfse](https://github.com/lzfse/lzfse) reference
-library; the script compiles with `swiftc` and compresses the JSON with `lzfse` into the
-same LZFSE catalog the Mac build writes.
-
-## Project structure
+## Layout
 
 ```
-TermOrganizeKit/        Swift package: shared Foundation code and the local MCP server
-  Package.swift
-  Sources/TermOrganizeKit/
-    Core/               Models, Banner client and parsers, catalog archive
-    Logic/              Degree-plan and schedule logic shared with the apps
-    Services/           Search, user models, UserData.json read and write
-    MCP/                stdio server (excluded from the iOS and Mac app targets)
-  Sources/TermOrganizeMCP/   term-organize-mcp executable
-  Tests/TermOrganizeMCPTests/
-NEUClassSearch/         App-only sources, compiled into both apps, plus resources
-  Core/, Logic/, Services/   Sources that stay in the app (CloudKit, Spotlight, PDF, assistant)
-  DesignSystem/         Theme, badges, Liquid Glass chips, week calendar, course rows
-  Resources/            Asset catalog, app icon, catalog snapshots, license text
-NEUClassSearchiOS/      iPhone and iPad interface
-  App/                  App entry, root TabView, router and deep links (termorganize://)
-  Features/             Home, Search, Course, Professors, Schedule, DegreePlan, Watchlist,
-                        Rooms, Settings, Onboarding
-NEUClassSearchMac/      Mac interface: sidebar window, course and professor windows, menu
-                        commands, Settings, Up Next menu bar extra
-NEUClassSearchWidgets/  WidgetKit extension (Up Next, Class Agenda)
-Shared/                 Code compiled into the apps and the widgets
-NEUClassSearchTests/    Swift Testing suites
-Tools/                  Catalog snapshot tool and build script
-docs/MCP.md             MCP tool names and JSON shapes
+TermOrganizeKit/          shared models, Banner client, search, degree and schedule logic, MCP server
+NEUClassSearch/           sources compiled into both apps (CloudKit, Spotlight, PDF, watchlist, design system)
+NEUClassSearchiOS/        iPhone and iPad interface
+NEUClassSearchMac/        Mac interface
+NEUClassSearchWidgets/    WidgetKit extension
+NEUClassSearchTests/      Swift Testing suites for the NEUClassSearch scheme
+Shared/                   code compiled into the apps and the widgets
+Tools/                    catalog snapshot script
+docs/MCP.md               MCP tool reference
 ```
 
-## License & attribution
+## License
 
 Copyright (C) 2026 Term Organize contributors.
-Source code: <https://github.com/AlexmChadwick/Northeastern-Term-Organize>.
+Source: <https://github.com/AlexmChadwick/Northeastern-Term-Organize>.
 
-Term Organize is free software, licensed under the **GNU Affero General Public License
-v3.0 only** — see [`LICENSE`](LICENSE). It is distributed WITHOUT ANY WARRANTY; see the
-license for details. It is a modified work based on SearchNEU
-(© Sandbox at Northeastern University and the SearchNEU contributors, AGPL-3.0); see
-[`NOTICE.md`](NOTICE.md) for exactly which parts were derived and how they were changed.
-Course information © Northeastern University.
+GNU Affero General Public License v3.0 only. The text is [`LICENSE`](LICENSE). There is no warranty. See `LegalText.noWarranty` and `LegalText.licenseGrant`. Course information is copyright Northeastern University (`LegalText.dataNotice`).
